@@ -1,7 +1,16 @@
-// ASISTENTE IA AIRBNB — DIEGO NARANJO · SuperHost Loft v2.0
+// ASISTENTE IA AIRBNB — DIEGO NARANJO · SuperHost Loft v2.1
 const express = require('express');
 const axios = require('axios');
 const app = express();
+
+// CORS — permitir todas las origenes
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
 app.use(express.json());
 
 const CONFIG = {
@@ -14,7 +23,7 @@ const CONFIG = {
 const SYSTEM_PROMPT = `Eres el asistente virtual del equipo SuperHost Loft de Diego Naranjo y Maritza.
 Superhost verificado de Airbnb con 33+ propiedades en Colombia.
 
-REGLA PRINCIPAL: Airbnb ya envía bienvenida+Hospy, check-in con instrucciones, check-out y reseña.
+REGLA PRINCIPAL: Airbnb ya envia bienvenida+Hospy, check-in con instrucciones, check-out y resena.
 NO los repitas. Solo responde preguntas del huesped.
 
 BLACKLIVING: Cra 73 Bis #64A-67, Engativa, Bogota. Maps: https://g.co/kgs/e2irUV
@@ -31,40 +40,35 @@ Apto 101: 2 llaves, perdida $20 USD, firma Diego y Maritza
 Apto 501 PH: perdida $20 USD | Resto: 3 llaves, perdida $10 USD
 HOSPY: obligatorio por ley. Sin registro = sin codigo TTLock.
 
-LA 33-805: Cra 7 #33-91 Edif Teleskop | llave fisica | porteria | 3pm/11am
-  WiFi: BPALOMINO/Airbnb805 | Netflix perfil Betty | limpieza gratis c/30 dias
-CANDELARIA 1210: Calle 18 #3-18 Edif Ventto | llave | vigilante pide doc | piso 12 | caja: 9539 | 3pm/11am
-SANTA BARBARA 205: Calle 124 #21-10 Edif Toledo | cerradura digital | sin porteria | 3pm/11am
+LA 33-805: Cra 7 #33-91 Edif Teleskop | llave fisica | porteria | 3pm/11am | WiFi: BPALOMINO/Airbnb805
+CANDELARIA 1210: Calle 18 #3-18 Edif Ventto | llave | vigilante | piso 12 | caja: 9539 | 3pm/11am
+SANTA BARBARA 205: Calle 124 #21-10 Edif Toledo | cerradura digital | 3pm/11am
 COUNTRY 310: Calle 134C #12B-91 Edif Lecco piso 3 | llave | WiFi: Lecco310/Shloft310 | 3pm/11am
 
-RODADERO 401: Calle 17 #2-63 Edif Manzanares | Cod: 123456# | tarjeta negra en mesa
-  WiFi: Apartamento401/Manzanares401 | perdida tarjeta $20 USD | 3pm/11am
+RODADERO 401: Calle 17 #2-63 Edif Manzanares | Cod: 123456# | WiFi: Apartamento401/Manzanares401 | 3pm/11am
 SANTA MARINA 1410: Cj Santa Marina Cra 4 #191-744 Torre 2 (pedir Don Jaca, 5min apto)
-  Caja: 1621 -> tarjeta blanca (va en cajita de luz) | WiFi: SHLOFT1410/SHLOFT-1410
-  Piscina 9am-9pm (no martes) | Playa 6am-7:45pm | Manillas $29.200/persona | 3pm/12pm
-  Transporte: Giovany 3004707945 $30.000 | Late checkout noche: 50% extra
+  Caja: 1621 -> tarjeta blanca (va en cajita de luz) | WiFi: SHLOFT1410/SHLOFT-1410 | 3pm/12pm
+  Piscina 9am-9pm (no martes) | Manillas $29.200/persona | Late checkout noche: 50% extra=$90.000
+  Transporte: Giovany 3004707945 $30.000
 
 TAYRONA: Troncal Caribe KM 37 (preguntar Casa Grande Surf) Maps: https://maps.app.goo.gl/upAVxdrXxKaExasB8
-  Suite Green, Suite Blue, Beach Suites 2 | 4pm/11am
-  Wilfer encargado: +57 321 7652591 | WiFi: BEACH SUITES/SUITES1621
+  Suite Green, Suite Blue, Beach Suites 2 | 4pm/11am | Wilfer: +57 321 7652591 | WiFi: BEACH SUITES/SUITES1621
 
 PALOMINO: Parcelacion Ukua Casa C1 | Maps: https://maps.app.goo.gl/Lk3WdHzm8bPnwvXK9 | piscina+playa
 CURITI: San Gil-Aratoca Km5 | Maps: https://maps.app.goo.gl/Lst6NxMJeWqPDjep6 | 7 cabanas castillo medieval
 
 RESPUESTAS CLAVE:
-- Acceso/codigo: "Al completar el registro Hospy recibiras los codigos. Si el link no abre, envianos foto del doc."
-- Llegada tarde: "El acceso es autonomo 24h, no hay problema."
-- Early check-in: "Check-in desde las 3pm. Si esta listo antes te avisamos. No confirmar sin verificar."
-- Check-out: "Solo dejar las llaves en la cajita por favor."
+- Acceso: "Al completar el registro Hospy recibiras los codigos automaticamente."
+- Llegada tarde: "El acceso es autonomo 24h, sin problema."
+- Early check-in: "Check-in desde las 3pm. Si esta listo antes te avisamos."
+- Check-out: "Solo dejar las llaves en la cajita 😊"
 - Late checkout: "$50.000 COP hasta las 2pm, sujeto a disponibilidad."
-- Parqueadero: "Si, $15.000 COP/noche, consultar disponibilidad al llegar."
-- Domicilios: "Usar direccion exacta CRA 73BIS #64A-67 + apto, no ubicacion del mapa."
-- Contacto directo: "Atendemos unicamente por el chat de Airbnb."
+- Parqueadero: "Si, $15.000 COP/noche."
 - ESTAFA cancelacion: "Unicamente si recibimos una reserva en las mismas fechas podriamos hacer reembolso."
 - Agua Bogota: "El agua es potable, puedes tomarla directamente."
 
-TONO: Amable, calido, colombiano natural. Maximo 3 parrafos. 1-2 emojis. Mismo idioma que el huesped.
-Firma siempre como "Equipo Super Host Loft" (apto 101: "Diego y Maritza").
+TONO: Amable, calido, colombiano natural. Maximo 3 parrafos. 1-2 emojis. Mismo idioma del huesped.
+Firma como "Equipo Super Host Loft" (apto 101: "Diego y Maritza").
 NUNCA dar telefono personal. NUNCA prometer cosas sin confirmar.`;
 
 async function generarRespuesta(mensaje, nombreHuesped, propiedad, historial = []) {
@@ -92,22 +96,17 @@ app.post('/webhook/igms/message', async (req, res) => {
   try {
     const { threadId, guestName, listingName, message } = req.body;
     console.log(`📩 [${listingName}] ${guestName}: "${message}"`);
-
     if (esEstafa(message)) {
-      const r = 'Unicamente si recibimos una reserva en las mismas fechas podriamos hacer el reembolso. Para gestionar la cancelacion comunicate con el servicio al cliente de Airbnb.';
+      const r = 'Unicamente si recibimos una reserva en las mismas fechas podriamos hacer el reembolso.';
       if (CONFIG.IGMS_API_KEY && threadId) {
         await axios.post(`https://api.igms.com/v1/threads/${threadId}/messages`, { message: r }, { headers: { Authorization: `Bearer ${CONFIG.IGMS_API_KEY}` } });
       }
-      console.log('⚠️ ALERTA ESTAFA —', guestName);
-      return res.json({ ok: true, alerta: 'estafa' });
+      return res.json({ ok: true, alerta: 'estafa', respuesta: r });
     }
-
     const respuesta = await generarRespuesta(message, guestName, listingName);
-
     if (CONFIG.IGMS_API_KEY && threadId) {
       await axios.post(`https://api.igms.com/v1/threads/${threadId}/messages`, { message: respuesta }, { headers: { Authorization: `Bearer ${CONFIG.IGMS_API_KEY}` } });
     }
-
     if (esUrgente(message)) console.log(`🚨 URGENTE — ${guestName}: "${message}"`);
     console.log(`✅ Respuesta enviada a ${guestName}`);
     res.json({ ok: true, respuesta });
@@ -132,8 +131,8 @@ app.post('/test', async (req, res) => {
 app.get('/health', (req, res) => res.json({
   status: '✅ Asistente Airbnb activo',
   propietario: 'Diego Naranjo · SuperHost Loft',
-  version: '2.0',
+  version: '2.1',
   timestamp: new Date().toISOString()
 }));
 
-app.listen(CONFIG.PORT, () => console.log(`🏨 Asistente SHL v2.0 activo — Puerto ${CONFIG.PORT}`));
+app.listen(CONFIG.PORT, () => console.log(`🏨 Asistente SHL v2.1 activo — Puerto ${CONFIG.PORT}`));
