@@ -1,5 +1,5 @@
-// ASISTENTE IA AIRBNB — DIEGO NARANJO · SuperHost Loft v3.2
-// Socket.IO v2 compatible + auto-login + polling HTTP
+// ASISTENTE IA AIRBNB — DIEGO NARANJO · SuperHost Loft v3.3
+// Socket.IO v2 + auto-login + polling + correcciones aprendidas
 const express = require('express');
 const axios = require('axios');
 const socketio = require('socket.io-client');
@@ -28,9 +28,6 @@ let socketConectado = false;
 let reconectando = false;
 const respondidos = new Set();
 
-// ============================================================
-// SYSTEM PROMPT
-// ============================================================
 const SYSTEM_PROMPT = `Eres el asistente virtual del equipo SuperHost Loft de Diego Naranjo y Maritza.
 Superhost verificado de Airbnb con 33+ propiedades en Colombia.
 
@@ -38,7 +35,7 @@ REGLA PRINCIPAL: Airbnb ya envia bienvenida+Hospy, check-in, check-out y resena 
 NO los repitas. Solo responde preguntas del huesped.
 
 BLACKLIVING: Cra 73 Bis #64A-67, Engativa, Bogota. Maps: https://g.co/kgs/e2irUV
-Lofts (2p): 301-306, 401-406 | Familiares: 101,201,202 | PH: 501 (jacuzzi)
+Lofts (2p): 301-306, 401-406 | Familiares: 101,201,202 | PH: 501
 Check-in: 3pm lofts/fam | 2pm PH | Check-out: 11am lofts | 12pm fam/PH
 Late checkout 2pm: $50.000 COP (sujeto disponibilidad)
 Acceso: TTLock porton + caja llaves fisica
@@ -50,6 +47,12 @@ Domicilios: CRA 73BIS #64A-67 + apto (no ubicacion del mapa)
 HOSPY: obligatorio. Sin registro = sin codigo TTLock.
 Agua Bogota: potable. Cafe: Sello Rojo.
 
+PH 501 BLACKLIVING — detalles importantes:
+- Habitacion principal: cama queen + bano privado con jacuzzi
+- TV: SOLO en habitacion principal y en la sala (las otras habitaciones NO tienen TV)
+- Capacidad: hasta 6 personas
+- Precio referencia: $1.833.009 COP por 8 noches
+
 LA 33-805: Cra 7 #33-91 Edif Teleskop | porteria | 3pm/11am | WiFi: BPALOMINO/Airbnb805
 CANDELARIA 1210: Calle 18 #3-18 Edif Ventto | piso12 | caja: 9539 | 3pm/11am
 SANTA BARBARA 205: Calle 124 #21-10 Edif Toledo | cerradura digital | 3pm/11am
@@ -57,6 +60,7 @@ COUNTRY 310: Calle 134C #12B-91 Edif Lecco | WiFi: Lecco310/Shloft310 | 3pm/11am
 RODADERO 401: Calle 17 #2-63 | Cod: 123456# | WiFi: Apartamento401 | 3pm/11am
 SANTA MARINA 1410: Cj Santa Marina Torre 2 (pedir Don Jaca) | caja:1621 | WiFi: SHLOFT1410 | 3pm/12pm
 Piscina 9am-9pm (no martes) | Manillas $29.200 | Late checkout: 50% extra
+Tiene aire acondicionado.
 TAYRONA: KM 37 Troncal (preguntar Casa Grande Surf) | 4pm/11am
 Wilfer: +57 321 7652591 | WiFi: BEACH SUITES/SUITES1621
 PALOMINO: Parcelacion Ukua Casa C1 | piscina+playa privada
@@ -69,9 +73,6 @@ NUNCA dar telefono personal. NUNCA prometer sin confirmar.
 Firma: Equipo Super Host Loft (apto 101: Diego y Maritza)
 TONO: Amable, colombiano, 2-3 parrafos, 1-2 emojis. Mismo idioma del huesped.`;
 
-// ============================================================
-// AUTO-LOGIN IGMS
-// ============================================================
 async function loginIGMS() {
   try {
     console.log('🔑 Renovando sesion IGMS...');
@@ -90,12 +91,8 @@ async function loginIGMS() {
         return true;
       }
     }
-    console.log('⚠️ Login sin cookie:', JSON.stringify(res.data).substring(0, 100));
     return false;
-  } catch(e) {
-    console.error('❌ Login error:', e.message);
-    return false;
-  }
+  } catch(e) { console.error('❌ Login error:', e.message); return false; }
 }
 
 async function getSesion() {
@@ -103,9 +100,6 @@ async function getSesion() {
   return sesion.phpsessid;
 }
 
-// ============================================================
-// GENERAR RESPUESTA CON CLAUDE
-// ============================================================
 async function generarRespuesta(mensaje, nombre, propiedad) {
   const res = await axios.post('https://api.anthropic.com/v1/messages',
     { model: 'claude-sonnet-4-20250514', max_tokens: 500, system: SYSTEM_PROMPT,
@@ -115,69 +109,48 @@ async function generarRespuesta(mensaje, nombre, propiedad) {
   return res.data.content[0].text;
 }
 
-// ============================================================
-// SOCKET.IO v2 — conectar a IGMS
-// ============================================================
 async function conectarSocket() {
   if (reconectando) return;
   reconectando = true;
-
   const phpsessid = await getSesion();
   if (!phpsessid) { reconectando = false; return; }
-
   if (socket) { try { socket.disconnect(); } catch(e) {} socket = null; }
-
-  // Socket.IO v2 — usar io() directamente (no { io })
   socket = socketio('https://www.igms.com:8082', {
     transports: ['websocket', 'polling'],
     extraHeaders: { Cookie: `PHPSESSID=${phpsessid}` },
-    reconnection: false, // manejamos reconexion manualmente
+    reconnection: false,
   });
-
   socket.on('connect', () => {
-    socketConectado = true;
-    reconectando = false;
+    socketConectado = true; reconectando = false;
     console.log('✅ Socket IGMS conectado:', socket.id);
     socket.emit('identify', { clientId: CONFIG.IGMS_CLIENT_ID });
   });
-
   socket.on('disconnect', () => {
     socketConectado = false;
     console.log('🔌 Socket desconectado');
-    // Reconectar tras 30 segundos (no en loop)
     setTimeout(() => { reconectando = false; conectarSocket(); }, 30000);
   });
-
   socket.on('connect_error', (err) => {
-    socketConectado = false;
-    reconectando = false;
-    console.error('❌ Socket error:', err.message?.substring(0, 80));
-    // Reconectar tras 60 segundos si hay error
+    socketConectado = false; reconectando = false;
+    console.error('❌ Socket error:', err.message?.substring(0, 60));
     setTimeout(() => conectarSocket(), 60000);
   });
-
   socket.on('new_message', async (data) => {
-    console.log('📩 Nuevo msg:', JSON.stringify(data).substring(0, 150));
+    console.log('📩 Nuevo msg:', JSON.stringify(data).substring(0, 120));
     await procesarMensajeSocket(data);
   });
 }
 
-// ============================================================
-// POLLING — revisar mensajes no leidos cada 2 min
-// ============================================================
 async function polling() {
   try {
     const phpsessid = await getSesion();
     if (!phpsessid) return;
-
     const res = await axios.get(
       'https://www.igms.com/api/data/threads?filters[limit]=10&filters[cursor]=0&filters[initial_load]=1&filters[category]=unread',
       { headers: { Cookie: `PHPSESSID=${phpsessid}`, 'User-Agent': 'Mozilla/5.0' } }
     );
-
     const threadIds = res.data?.data?.thread_ids || [];
     if (threadIds.length > 0) console.log(`📬 ${threadIds.length} threads no leidos`);
-
     for (const threadId of threadIds.slice(0, 3)) {
       await procesarThread(threadId, phpsessid);
       await new Promise(r => setTimeout(r, 1500));
@@ -194,61 +167,46 @@ async function procesarThread(threadId, phpsessid) {
       `https://www.igms.com/api/data/thread-page-data?params[thread_id]=${threadId}&params[platform_type]=airbnb&params[owner_user_id]=${CONFIG.IGMS_CLIENT_ID}`,
       { headers: { Cookie: `PHPSESSID=${phpsessid}`, 'User-Agent': 'Mozilla/5.0' } }
     );
-
     const data = res.data?.data;
     const scope = res.data?.scopeData || {};
     if (!data) return;
-
     const eventIds = data.platformThreadEventIds || [];
     const lastEventId = eventIds[eventIds.length - 1];
     if (!lastEventId || respondidos.has(lastEventId)) return;
-
     const threadEvent = scope.PlatformThreadEvent?.data?.[lastEventId];
     if (!threadEvent) return;
-
     const esHuesped = threadEvent.sent_by_host === false || threadEvent.is_incoming === true;
     const mensaje = threadEvent.message || threadEvent.body || '';
     if (!esHuesped || !mensaje || mensaje.length < 2) return;
-
     const reservas = scope.Reservation?.data || {};
     const resKey = Object.keys(reservas)[0];
     const reserva = reservas[resKey] || {};
     const propiedad = reserva.listing_name || 'Propiedad SuperHost Loft';
     const nombre = reserva.guest_name || threadEvent.author_name || 'Huesped';
-
     console.log(`📩 [${propiedad.substring(0,30)}] ${nombre}: "${mensaje.substring(0,60)}"`);
     respondidos.add(lastEventId);
-
     const respuesta = await generarRespuesta(mensaje, nombre, propiedad);
     await enviarRespuesta(threadId, respuesta, phpsessid);
     console.log(`✅ Respondido a ${nombre}`);
-  } catch(e) {
-    console.error('❌ Error procesando thread:', e.message);
-  }
+  } catch(e) { console.error('❌ Error thread:', e.message); }
 }
 
 async function procesarMensajeSocket(data) {
   const msgId = data.event_id || data.id || (data.thread_id + '_' + Date.now());
   if (respondidos.has(msgId)) return;
-
   const esHuesped = data.sent_by_host === false || data.from_host === false || data.is_incoming === true;
   const mensaje = data.message || data.text || data.body || '';
   const threadId = data.thread_id || data.threadId;
   if (!mensaje || !threadId || !esHuesped) return;
-
   respondidos.add(msgId);
   const nombre = data.guest_name || data.author || 'Huesped';
   const propiedad = data.listing_name || 'Propiedad SHL';
   const phpsessid = await getSesion();
   if (!phpsessid) return;
-
   const respuesta = await generarRespuesta(mensaje, nombre, propiedad);
   await enviarRespuesta(threadId, respuesta, phpsessid);
 }
 
-// ============================================================
-// ENVIAR RESPUESTA
-// ============================================================
 async function enviarRespuesta(threadId, mensaje, phpsessid) {
   if (socket && socketConectado) {
     return new Promise((resolve) => {
@@ -271,26 +229,20 @@ async function enviarHTTP(threadId, mensaje, phpsessid) {
       const r = await axios.post(ep.url, ep.body, {
         headers: { Cookie: `PHPSESSID=${phpsessid}`, 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' }
       });
-      if (r.status < 400) { console.log(`✅ Enviado HTTP`); return true; }
+      if (r.status < 400) { console.log('✅ Enviado HTTP'); return true; }
     } catch(e) { /* siguiente */ }
   }
-  console.log('⚠️ No se pudo enviar — endpoint de envio pendiente de confirmar');
+  console.log('⚠️ Envio pendiente — endpoint HTTP no confirmado aun');
   return false;
 }
 
-// ============================================================
-// INICIALIZAR
-// ============================================================
 (async () => {
   await loginIGMS();
   await conectarSocket();
-  setInterval(polling, 2 * 60 * 1000);       // polling cada 2 min
-  setInterval(loginIGMS, 20 * 60 * 60 * 1000); // re-login cada 20h
+  setInterval(polling, 2 * 60 * 1000);
+  setInterval(loginIGMS, 20 * 60 * 60 * 1000);
 })();
 
-// ============================================================
-// ENDPOINTS
-// ============================================================
 app.post('/test', async (req, res) => {
   try {
     const { mensaje, nombre, propiedad } = req.body;
@@ -305,10 +257,10 @@ app.post('/test', async (req, res) => {
 
 app.get('/health', (req, res) => res.json({
   status: '✅ Asistente activo',
-  version: '3.2',
+  version: '3.3',
   socket: socketConectado ? '✅ conectado' : '⏳ reconectando',
   sesion: sesion.phpsessid ? '✅ activa' : '❌ sin sesion',
   timestamp: new Date().toISOString()
 }));
 
-app.listen(CONFIG.PORT, () => console.log(`🏨 Asistente SHL v3.2 — Puerto ${CONFIG.PORT}`));
+app.listen(CONFIG.PORT, () => console.log(`🏨 Asistente SHL v3.3 — Puerto ${CONFIG.PORT}`));
