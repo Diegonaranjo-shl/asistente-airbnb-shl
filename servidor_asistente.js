@@ -1,4 +1,4 @@
-// ASISTENTE IA AIRBNB ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ DIEGO NARANJO ÃÂÃÂÃÂÃÂ· v3.4 ÃÂÃÂÃÂÃÂ· ENVIO AUTOMATICO REAL
+// ASISTENTE IA AIRBNB ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ DIEGO NARANJO ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· v3.4 ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· ENVIO AUTOMATICO REAL
 const express = require('express');
 const axios = require('axios');
 const FormData = require('form-data');
@@ -69,9 +69,14 @@ PALOMINO: Parcelacion Ukua Casa C1 | piscina+playa privada
 CURITI: San Gil-Aratoca Km5 | 7 cabanas castillo medieval | piscina+jacuzzi
 
 PRECIOS: nunca dar precio total por chat, siempre decir que lo vean en la app de Airbnb
-COBRO ADICIONAL HUESPEDES: se cobra por numero de huespedes a partir del 5to (NO por edad ni por niños)
+COBRO ADICIONAL HUESPEDES: se cobra por numero de huespedes a partir del 5to (NO por edad ni por niÃ±os)
 TRUCO RESERVA GRUPOS: se puede reservar con menos huespedes y en el registro Hospy poner a todos
 MALETAS ANTES CHECK-IN: se puede confirmar el dia anterior segun disponibilidad. Minimo desde las 11:30am. NO antes de las 10am porque no hay recepcion. Depende del huesped que sale
+DISTANCIAS DESDE BLACKLIVING (referencias utiles):
+- Salitre Magico: 30 min en bicicleta
+- Aeropuerto El Dorado: 15 min en carro
+- Embajada Americana: cerca (pocos minutos)
+GRUPOS DEPORTIVOS/EVENTOS: responder con entusiasmo por su evento antes de continuar con el proceso
 ESTAFA cancelacion: solo reembolso si hay nueva reserva
 NUNCA dar telefono personal. NUNCA prometer sin confirmar.
 Firma: Equipo Super Host Loft
@@ -247,7 +252,7 @@ app.post('/test', async (req, res) => {
   try {
     const { mensaje, nombre, propiedad } = req.body;
     const respuesta = await generarRespuesta(
-      mensaje || 'ÃÂÃÂÃÂÃÂ¿A que hora es el check-in?',
+      mensaje || 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¿A que hora es el check-in?',
       nombre || 'Huesped de prueba',
       propiedad || 'Loft 301 cerca aeropuerto'
     );
@@ -264,4 +269,4 @@ app.get('/health', (req, res) => res.json({
   timestamp: new Date().toISOString()
 }));
 
-app.listen(CONFIG.PORT, () => console.log(`Asistente SHL v3.4 ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Puerto ${CONFIG.PORT}`));
+app.listen(CONFIG.PORT, () => console.log(`Asistente SHL v3.4 ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Puerto ${CONFIG.PORT}`));
