@@ -1,8 +1,8 @@
-// ASISTENTE IA AIRBNB — DIEGO NARANJO · SuperHost Loft v3.1
-// Con Socket.IO + auto-login IGMS + renovacion automatica de sesion
+// ASISTENTE IA AIRBNB — DIEGO NARANJO · SuperHost Loft v3.2
+// Socket.IO v2 compatible + auto-login + polling HTTP
 const express = require('express');
 const axios = require('axios');
-const { io } = require('socket.io-client');
+const socketio = require('socket.io-client');
 const app = express();
 
 app.use((req, res, next) => {
@@ -16,15 +16,16 @@ app.use(express.json());
 
 const CONFIG = {
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-  IGMS_EMAIL:      process.env.IGMS_EMAIL,
-  IGMS_PASSWORD:   process.env.IGMS_PASSWORD,
-  IGMS_CLIENT_ID:  parseInt(process.env.IGMS_CLIENT_ID || '93483'),
-  PORT:            process.env.PORT || 3000,
+  IGMS_EMAIL:       process.env.IGMS_EMAIL,
+  IGMS_PASSWORD:    process.env.IGMS_PASSWORD,
+  IGMS_CLIENT_ID:   parseInt(process.env.IGMS_CLIENT_ID || '93483'),
+  PORT:             process.env.PORT || 3000,
 };
 
 let sesion = { phpsessid: null, expira: 0 };
 let socket = null;
 let socketConectado = false;
+let reconectando = false;
 const respondidos = new Set();
 
 // ============================================================
@@ -53,14 +54,11 @@ LA 33-805: Cra 7 #33-91 Edif Teleskop | porteria | 3pm/11am | WiFi: BPALOMINO/Ai
 CANDELARIA 1210: Calle 18 #3-18 Edif Ventto | piso12 | caja: 9539 | 3pm/11am
 SANTA BARBARA 205: Calle 124 #21-10 Edif Toledo | cerradura digital | 3pm/11am
 COUNTRY 310: Calle 134C #12B-91 Edif Lecco | WiFi: Lecco310/Shloft310 | 3pm/11am
-
-RODADERO 401: Calle 17 #2-63 Edif Manzanares | Cod: 123456# | WiFi: Apartamento401 | 3pm/11am
+RODADERO 401: Calle 17 #2-63 | Cod: 123456# | WiFi: Apartamento401 | 3pm/11am
 SANTA MARINA 1410: Cj Santa Marina Torre 2 (pedir Don Jaca) | caja:1621 | WiFi: SHLOFT1410 | 3pm/12pm
 Piscina 9am-9pm (no martes) | Manillas $29.200 | Late checkout: 50% extra
-
 TAYRONA: KM 37 Troncal (preguntar Casa Grande Surf) | 4pm/11am
 Wilfer: +57 321 7652591 | WiFi: BEACH SUITES/SUITES1621
-
 PALOMINO: Parcelacion Ukua Casa C1 | piscina+playa privada
 CURITI: San Gil-Aratoca Km5 | 7 cabanas castillo medieval | piscina+jacuzzi
 
@@ -72,48 +70,36 @@ Firma: Equipo Super Host Loft (apto 101: Diego y Maritza)
 TONO: Amable, colombiano, 2-3 parrafos, 1-2 emojis. Mismo idioma del huesped.`;
 
 // ============================================================
-// AUTO-LOGIN IGMS — renueva sesion automaticamente
+// AUTO-LOGIN IGMS
 // ============================================================
 async function loginIGMS() {
   try {
     console.log('🔑 Renovando sesion IGMS...');
     const res = await axios.post('https://www.igms.com/api/user-api/login',
       { email: CONFIG.IGMS_EMAIL, password: CONFIG.IGMS_PASSWORD, platform: 'web' },
-      { headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' },
-        withCredentials: true, maxRedirects: 5 }
+      { headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' }, maxRedirects: 5 }
     );
-
-    // Extraer PHPSESSID de Set-Cookie
     const cookies = res.headers['set-cookie'] || [];
     const phpCookie = cookies.find(c => c.includes('PHPSESSID'));
     if (phpCookie) {
       const match = phpCookie.match(/PHPSESSID=([^;]+)/);
       if (match) {
         sesion.phpsessid = match[1];
-        sesion.expira = Date.now() + 22 * 60 * 60 * 1000; // 22 horas
+        sesion.expira = Date.now() + 22 * 60 * 60 * 1000;
         console.log('✅ Sesion IGMS renovada:', sesion.phpsessid.substring(0,8) + '...');
         return true;
       }
     }
-
-    // Si no hay cookie en headers, intentar con el hash de la respuesta
-    const data = res.data?.data?.data;
-    if (data?.hash) {
-      console.log('Login OK via hash, buscando cookie...');
-    }
-
-    console.log('⚠️ Login response:', JSON.stringify(res.data).substring(0, 200));
+    console.log('⚠️ Login sin cookie:', JSON.stringify(res.data).substring(0, 100));
     return false;
   } catch(e) {
-    console.error('❌ Login IGMS error:', e.message);
+    console.error('❌ Login error:', e.message);
     return false;
   }
 }
 
 async function getSesion() {
-  if (!sesion.phpsessid || Date.now() > sesion.expira) {
-    await loginIGMS();
-  }
+  if (!sesion.phpsessid || Date.now() > sesion.expira) await loginIGMS();
   return sesion.phpsessid;
 }
 
@@ -130,52 +116,54 @@ async function generarRespuesta(mensaje, nombre, propiedad) {
 }
 
 // ============================================================
-// SOCKET.IO — conectar a IGMS
+// SOCKET.IO v2 — conectar a IGMS
 // ============================================================
 async function conectarSocket() {
+  if (reconectando) return;
+  reconectando = true;
+
   const phpsessid = await getSesion();
-  if (!phpsessid) { console.log('⚠️ Sin sesion para socket'); return; }
+  if (!phpsessid) { reconectando = false; return; }
 
-  if (socket) { socket.disconnect(); socket = null; }
+  if (socket) { try { socket.disconnect(); } catch(e) {} socket = null; }
 
-  socket = io('https://www.igms.com:8082', {
+  // Socket.IO v2 — usar io() directamente (no { io })
+  socket = socketio('https://www.igms.com:8082', {
     transports: ['websocket', 'polling'],
     extraHeaders: { Cookie: `PHPSESSID=${phpsessid}` },
-    reconnection: true, reconnectionDelay: 5000,
+    reconnection: false, // manejamos reconexion manualmente
   });
 
   socket.on('connect', () => {
     socketConectado = true;
+    reconectando = false;
     console.log('✅ Socket IGMS conectado:', socket.id);
     socket.emit('identify', { clientId: CONFIG.IGMS_CLIENT_ID });
   });
 
   socket.on('disconnect', () => {
     socketConectado = false;
-    console.log('🔌 Socket desconectado — reconectando...');
+    console.log('🔌 Socket desconectado');
+    // Reconectar tras 30 segundos (no en loop)
+    setTimeout(() => { reconectando = false; conectarSocket(); }, 30000);
   });
 
-  socket.on('connect_error', async (err) => {
-    console.error('❌ Socket error:', err.message);
-    // Renovar sesion y reconectar
-    await loginIGMS();
+  socket.on('connect_error', (err) => {
+    socketConectado = false;
+    reconectando = false;
+    console.error('❌ Socket error:', err.message?.substring(0, 80));
+    // Reconectar tras 60 segundos si hay error
+    setTimeout(() => conectarSocket(), 60000);
   });
 
-  // Escuchar mensajes nuevos de huespedes
   socket.on('new_message', async (data) => {
-    console.log('📩 Nuevo msg socket:', JSON.stringify(data).substring(0, 150));
-    await procesarMensaje(data);
-  });
-
-  socket.on('message', async (data) => {
-    if (data?.type === 'new_message' || data?.event === 'new_message') {
-      await procesarMensaje(data);
-    }
+    console.log('📩 Nuevo msg:', JSON.stringify(data).substring(0, 150));
+    await procesarMensajeSocket(data);
   });
 }
 
 // ============================================================
-// POLLING — leer mensajes no leidos cada 2 min
+// POLLING — revisar mensajes no leidos cada 2 min
 // ============================================================
 async function polling() {
   try {
@@ -192,13 +180,11 @@ async function polling() {
 
     for (const threadId of threadIds.slice(0, 3)) {
       await procesarThread(threadId, phpsessid);
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise(r => setTimeout(r, 1500));
     }
   } catch(e) {
     console.error('❌ Polling error:', e.message);
-    if (e.response?.status === 401 || e.response?.status === 403) {
-      sesion.expira = 0; // forzar re-login
-    }
+    if (e.response?.status === 401 || e.response?.status === 403) sesion.expira = 0;
   }
 }
 
@@ -210,32 +196,27 @@ async function procesarThread(threadId, phpsessid) {
     );
 
     const data = res.data?.data;
+    const scope = res.data?.scopeData || {};
     if (!data) return;
 
-    // Obtener IDs de mensajes
-    const msgIds = data.message_ids || [];
     const eventIds = data.platformThreadEventIds || [];
     const lastEventId = eventIds[eventIds.length - 1];
-
     if (!lastEventId || respondidos.has(lastEventId)) return;
 
-    // Obtener datos del scope para extraer el mensaje
-    const scope = res.data?.scopeData || {};
     const threadEvent = scope.PlatformThreadEvent?.data?.[lastEventId];
     if (!threadEvent) return;
 
-    const esHuesped = threadEvent.sent_by_host === false || threadEvent.type === 'message_received';
+    const esHuesped = threadEvent.sent_by_host === false || threadEvent.is_incoming === true;
     const mensaje = threadEvent.message || threadEvent.body || '';
-    if (!esHuesped || !mensaje) return;
+    if (!esHuesped || !mensaje || mensaje.length < 2) return;
 
-    // Datos de la reserva
     const reservas = scope.Reservation?.data || {};
     const resKey = Object.keys(reservas)[0];
     const reserva = reservas[resKey] || {};
     const propiedad = reserva.listing_name || 'Propiedad SuperHost Loft';
     const nombre = reserva.guest_name || threadEvent.author_name || 'Huesped';
 
-    console.log(`📩 [${propiedad}] ${nombre}: "${mensaje.substring(0, 80)}"`);
+    console.log(`📩 [${propiedad.substring(0,30)}] ${nombre}: "${mensaje.substring(0,60)}"`);
     respondidos.add(lastEventId);
 
     const respuesta = await generarRespuesta(mensaje, nombre, propiedad);
@@ -246,19 +227,18 @@ async function procesarThread(threadId, phpsessid) {
   }
 }
 
-async function procesarMensaje(data) {
-  const msgId = data.event_id || data.id || JSON.stringify(data).substring(0, 50);
+async function procesarMensajeSocket(data) {
+  const msgId = data.event_id || data.id || (data.thread_id + '_' + Date.now());
   if (respondidos.has(msgId)) return;
 
+  const esHuesped = data.sent_by_host === false || data.from_host === false || data.is_incoming === true;
   const mensaje = data.message || data.text || data.body || '';
-  const nombre = data.guest_name || data.author || 'Huesped';
-  const propiedad = data.listing_name || 'Propiedad SHL';
   const threadId = data.thread_id || data.threadId;
-  const esHuesped = data.sent_by_host === false || data.from_host === false || data.is_guest === true;
-
   if (!mensaje || !threadId || !esHuesped) return;
 
   respondidos.add(msgId);
+  const nombre = data.guest_name || data.author || 'Huesped';
+  const propiedad = data.listing_name || 'Propiedad SHL';
   const phpsessid = await getSesion();
   if (!phpsessid) return;
 
@@ -267,37 +247,34 @@ async function procesarMensaje(data) {
 }
 
 // ============================================================
-// ENVIAR RESPUESTA VIA SOCKET O HTTP
+// ENVIAR RESPUESTA
 // ============================================================
 async function enviarRespuesta(threadId, mensaje, phpsessid) {
-  // Intentar via socket primero
   if (socket && socketConectado) {
     return new Promise((resolve) => {
-      const timeout = setTimeout(() => resolve(enviarRespuestaHTTP(threadId, mensaje, phpsessid)), 3000);
+      const timeout = setTimeout(() => resolve(enviarHTTP(threadId, mensaje, phpsessid)), 3000);
       socket.emit('send_message', { thread_id: threadId, message: mensaje }, (ack) => {
         clearTimeout(timeout);
-        if (ack?.success) { console.log(`✅ Enviado via socket thread ${threadId}`); resolve(true); }
-        else resolve(enviarRespuestaHTTP(threadId, mensaje, phpsessid));
+        ack?.success ? resolve(true) : resolve(enviarHTTP(threadId, mensaje, phpsessid));
       });
     });
   }
-  return enviarRespuestaHTTP(threadId, mensaje, phpsessid);
+  return enviarHTTP(threadId, mensaje, phpsessid);
 }
 
-async function enviarRespuestaHTTP(threadId, mensaje, phpsessid) {
-  const endpoints = [
+async function enviarHTTP(threadId, mensaje, phpsessid) {
+  for (const ep of [
     { url: 'https://www.igms.com/api/data/thread-reply', body: { thread_id: threadId, message: mensaje } },
     { url: 'https://www.igms.com/api/inbox/reply', body: { threadId, message: mensaje } },
-  ];
-  for (const ep of endpoints) {
+  ]) {
     try {
       const r = await axios.post(ep.url, ep.body, {
         headers: { Cookie: `PHPSESSID=${phpsessid}`, 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' }
       });
-      if (r.status < 400) { console.log(`✅ Enviado HTTP ${ep.url.split('/').pop()}`); return true; }
+      if (r.status < 400) { console.log(`✅ Enviado HTTP`); return true; }
     } catch(e) { /* siguiente */ }
   }
-  console.log('⚠️ No se pudo enviar respuesta');
+  console.log('⚠️ No se pudo enviar — endpoint de envio pendiente de confirmar');
   return false;
 }
 
@@ -307,12 +284,8 @@ async function enviarRespuestaHTTP(threadId, mensaje, phpsessid) {
 (async () => {
   await loginIGMS();
   await conectarSocket();
-  // Polling cada 2 minutos
-  setInterval(polling, 2 * 60 * 1000);
-  // Re-login cada 20 horas
-  setInterval(loginIGMS, 20 * 60 * 60 * 1000);
-  // Reconectar socket cada hora si se desconecto
-  setInterval(async () => { if (!socketConectado) await conectarSocket(); }, 60 * 60 * 1000);
+  setInterval(polling, 2 * 60 * 1000);       // polling cada 2 min
+  setInterval(loginIGMS, 20 * 60 * 60 * 1000); // re-login cada 20h
 })();
 
 // ============================================================
@@ -331,11 +304,11 @@ app.post('/test', async (req, res) => {
 });
 
 app.get('/health', (req, res) => res.json({
-  status: '✅ Asistente Airbnb activo',
-  version: '3.1',
-  socket: socketConectado ? '✅ conectado' : '❌ desconectado',
+  status: '✅ Asistente activo',
+  version: '3.2',
+  socket: socketConectado ? '✅ conectado' : '⏳ reconectando',
   sesion: sesion.phpsessid ? '✅ activa' : '❌ sin sesion',
   timestamp: new Date().toISOString()
 }));
 
-app.listen(CONFIG.PORT, () => console.log(`🏨 Asistente SHL v3.1 activo — Puerto ${CONFIG.PORT}`));
+app.listen(CONFIG.PORT, () => console.log(`🏨 Asistente SHL v3.2 — Puerto ${CONFIG.PORT}`));
