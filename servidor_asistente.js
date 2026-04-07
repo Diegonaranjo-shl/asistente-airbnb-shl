@@ -1,4 +1,4 @@
-// ASISTENTE IA AIRBNB — DIEGO NARANJO · v3.4 · ENVIO AUTOMATICO REAL
+// ASISTENTE IA AIRBNB â DIEGO NARANJO Â· v3.4 Â· ENVIO AUTOMATICO REAL
 const express = require('express');
 const axios = require('axios');
 const FormData = require('form-data');
@@ -36,7 +36,7 @@ NO los repitas. Solo responde preguntas del huesped.
 
 BLACKLIVING: Cra 73 Bis #64A-67, Engativa, Bogota. Maps: https://g.co/kgs/e2irUV
 Lofts (2p): 301-306, 401-406 | Familiares: 101,201,202 | PH: 501
-Check-in: 3pm lofts/fam | 2pm PH | Check-out: 11am lofts | 12pm fam/PH
+Check-in: 3pm TODAS las propiedades | Check-out: 11am lofts | 12pm fam/PH
 Late checkout 2pm: $50.000 COP (sujeto disponibilidad)
 Acceso: TTLock porton + caja llaves fisica
 Codigos caja: 101->2850|201->1607|202->0190|301->3676|302->9244|303->2713|304->9094|305->5961
@@ -50,6 +50,7 @@ Agua Bogota: potable. Cafe: Sello Rojo.
 PH 501 BLACKLIVING:
 - Hab principal: cama queen + bano privado con jacuzzi
 - TV: SOLO en habitacion principal y en la sala (otras habitaciones NO tienen TV)
+- Camas: queen (principal) + doble (hab2) + semidoble + camarote sencillo (hab3) + sofa cama doble (sala)
 - Capacidad: hasta 6 personas
 
 LA 33-805: Cra 7 #33-91 Edif Teleskop | WiFi: BPALOMINO/Airbnb805
@@ -58,6 +59,7 @@ SANTA BARBARA 205: Calle 124 #21-10 Edif Toledo
 COUNTRY 310: Calle 134C #12B-91 Edif Lecco | WiFi: Lecco310/Shloft310
 RODADERO 401: Calle 17 #2-63 | Cod: 123456# | WiFi: Apartamento401
 SANTA MARINA 1410: Cj Santa Marina Torre 2 | caja:1621 | WiFi: SHLOFT1410 | tiene A/C
+Camas: 1 doble (hab principal) + 1 sofa cama king (sala)
 Piscina 9am-9pm (no martes) | Manillas $29.200
 TAYRONA: KM 37 Troncal | 4pm/11am | Wilfer: +57 321 7652591 | WiFi: BEACH SUITES/SUITES1621
 PALOMINO: Parcelacion Ukua Casa C1 | piscina+playa privada
@@ -238,7 +240,7 @@ app.post('/test', async (req, res) => {
   try {
     const { mensaje, nombre, propiedad } = req.body;
     const respuesta = await generarRespuesta(
-      mensaje || '¿A que hora es el check-in?',
+      mensaje || 'Â¿A que hora es el check-in?',
       nombre || 'Huesped de prueba',
       propiedad || 'Loft 301 cerca aeropuerto'
     );
@@ -255,4 +257,4 @@ app.get('/health', (req, res) => res.json({
   timestamp: new Date().toISOString()
 }));
 
-app.listen(CONFIG.PORT, () => console.log(`Asistente SHL v3.4 — Puerto ${CONFIG.PORT}`));
+app.listen(CONFIG.PORT, () => console.log(`Asistente SHL v3.4 â Puerto ${CONFIG.PORT}`));
