@@ -1,4 +1,4 @@
-// ASISTENTE IA AIRBNB â DIEGO NARANJO Â· v3.4 Â· ENVIO AUTOMATICO REAL
+// ASISTENTE IA AIRBNB Ã¢ÂÂ DIEGO NARANJO ÃÂ· v3.4 ÃÂ· ENVIO AUTOMATICO REAL
 const express = require('express');
 const axios = require('axios');
 const FormData = require('form-data');
@@ -41,17 +41,18 @@ Late checkout 2pm: $50.000 COP (sujeto disponibilidad)
 Acceso: TTLock porton + caja llaves fisica
 Codigos caja: 101->2850|201->1607|202->0190|301->3676|302->9244|303->2713|304->9094|305->5961
 306->6457|401->8219|402->3253|403->9733|404->9034|405->1357|406->1486|501->2080
-Servicios: Parqueadero $15.000/noche | Lavanderia $7.000/turno piso5 (8-11am o 3-7pm, Nequi 3107541755)
+Servicios: Parqueadero SOLO para moto $15.000/noche (no hay parqueadero para carro) | Lavanderia $7.000/turno piso5 (8-11am o 3-7pm, Nequi 3107541755)
 Limpieza $50.000 | Sabanas $25.000 | Lavado ropa $30.000
 Domicilios: CRA 73BIS #64A-67 + apto (no ubicacion del mapa)
 HOSPY: obligatorio. Sin registro = sin codigo TTLock.
 Agua Bogota: potable. Cafe: Sello Rojo.
 
 PH 501 BLACKLIVING:
+- Terraza privada de uso exclusivo del apartamento
 - Hab principal: cama queen + bano privado con jacuzzi
 - TV: SOLO en habitacion principal y en la sala (otras habitaciones NO tienen TV)
 - Camas: queen (principal) + doble (hab2) + semidoble + camarote sencillo (hab3) + sofa cama doble (sala)
-- Capacidad: hasta 6 personas
+- Capacidad: hasta 8 personas
 
 LA 33-805: Cra 7 #33-91 Edif Teleskop | WiFi: BPALOMINO/Airbnb805
 CANDELARIA 1210: Calle 18 #3-18 Edif Ventto | caja: 9539
@@ -240,7 +241,7 @@ app.post('/test', async (req, res) => {
   try {
     const { mensaje, nombre, propiedad } = req.body;
     const respuesta = await generarRespuesta(
-      mensaje || 'Â¿A que hora es el check-in?',
+      mensaje || 'ÃÂ¿A que hora es el check-in?',
       nombre || 'Huesped de prueba',
       propiedad || 'Loft 301 cerca aeropuerto'
     );
@@ -257,4 +258,4 @@ app.get('/health', (req, res) => res.json({
   timestamp: new Date().toISOString()
 }));
 
-app.listen(CONFIG.PORT, () => console.log(`Asistente SHL v3.4 â Puerto ${CONFIG.PORT}`));
+app.listen(CONFIG.PORT, () => console.log(`Asistente SHL v3.4 Ã¢ÂÂ Puerto ${CONFIG.PORT}`));
