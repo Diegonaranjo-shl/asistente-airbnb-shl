@@ -1,4 +1,4 @@
-// ASISTENTE IA AIRBNB ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ DIEGO NARANJO ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· v3.4 ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· ENVIO AUTOMATICO REAL
+// ASISTENTE IA AIRBNB ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ DIEGO NARANJO ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· v3.4 ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ· ENVIO AUTOMATICO REAL
 const express = require('express');
 const axios = require('axios');
 const FormData = require('form-data');
@@ -61,14 +61,26 @@ PH 501 BLACKLIVING:
 LA 33-805: Cra 7 #33-91 Edif Teleskop | WiFi: BPALOMINO/Airbnb805
 MUSEO 2-1309 (Centro Internacional):
 - Direccion CORRECTA: Cra 13a #28-21 Torre A Apto 1309 (el anuncio de Airbnb tiene un error, NO usar esa direccion)
-- Acceso: el vigilante tiene autorizacion → entrega llaves en sobre (llave apto + chips puerta principal)
+- Acceso: el vigilante tiene autorizacion â entrega llaves en sobre (llave apto + chips puerta principal)
 - WiFi: Red Palomino_5G / Contrasena: E6E4X4J9H7A9
 - Check-in temprano: pedir fotos documentos de TODOS los huespedes para autorizar ingreso
 - Documentos: se requieren de todos los huespedes (no solo del titular de la reserva)
 CANDELARIA 1210: Calle 18 #3-18 Edif Ventto | caja: 9539
 SANTA BARBARA 205: Calle 124 #21-10 Edif Toledo
 COUNTRY 310: Calle 134C #12B-91 Edif Lecco | WiFi: Lecco310/Shloft310
-RODADERO 401: Calle 17 #2-63 | Cod: 123456# | WiFi: Apartamento401
+RODADERO 401 (Santa Marta):
+- Direccion: Calle 17 #2-63, El Rodadero. Edificio Manzanares, Apto 401
+- Maps: https://maps.app.goo.gl/BEoQs7cRnZt1QQob7
+- Check-in: hasta las 10pm (entrega de llaves PRESENCIAL, no autonomo)
+- Encargada: Yurani (coordina la entrega de llaves)
+- Cerradura electronica: tocar teclado unos segundos para activar, codigo 123456#
+- Tarjeta negra: acceso sin codigo. Perdida cuesta 20 USD
+- WiFi: Red Apartamento401 / Clave: Manzanares401
+- AC: conectar extractor de aire al usarlo (hay uno en sala y uno en habitacion)
+- TV Smart: Netflix + app MAGIC (cable)
+- Multa: 100 USD por persona no registrada que ingrese
+- Late checkout: 50% de la tarifa diaria
+- Comunicacion: SOLO por chat Airbnb, NO dar WhatsApp personal
 SANTA MARINA 1410: Cj Santa Marina Torre 2 | caja:1621 | WiFi: SHLOFT1410 | tiene A/C
 Camas: 1 doble (hab principal) + 1 sofa cama king (sala)
 Piscina 9am-9pm (no martes) | Manillas $29.200
@@ -77,7 +89,7 @@ PALOMINO: Parcelacion Ukua Casa C1 | piscina+playa privada
 CURITI: San Gil-Aratoca Km5 | 7 cabanas castillo medieval | piscina+jacuzzi
 
 PRECIOS: nunca dar precio total por chat, siempre decir que lo vean en la app de Airbnb
-COBRO ADICIONAL HUESPEDES: se cobra por numero de huespedes a partir del 5to (NO por edad ni por niÃÂÃÂ±os)
+COBRO ADICIONAL HUESPEDES: se cobra por numero de huespedes a partir del 5to (NO por edad ni por niÃÂÃÂÃÂÃÂ±os)
 TRUCO RESERVA GRUPOS: se puede reservar con menos huespedes y en el registro Hospy poner a todos
 MALETAS ANTES CHECK-IN: se puede confirmar el dia anterior segun disponibilidad. Minimo desde las 11:30am. NO antes de las 10am porque no hay recepcion. Depende del huesped que sale
 DISTANCIAS DESDE BLACKLIVING (referencias utiles):
@@ -260,7 +272,7 @@ app.post('/test', async (req, res) => {
   try {
     const { mensaje, nombre, propiedad } = req.body;
     const respuesta = await generarRespuesta(
-      mensaje || 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¿A que hora es el check-in?',
+      mensaje || 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¿A que hora es el check-in?',
       nombre || 'Huesped de prueba',
       propiedad || 'Loft 301 cerca aeropuerto'
     );
@@ -277,4 +289,4 @@ app.get('/health', (req, res) => res.json({
   timestamp: new Date().toISOString()
 }));
 
-app.listen(CONFIG.PORT, () => console.log(`Asistente SHL v3.4 ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Puerto ${CONFIG.PORT}`));
+app.listen(CONFIG.PORT, () => console.log(`Asistente SHL v3.4 ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Puerto ${CONFIG.PORT}`));
