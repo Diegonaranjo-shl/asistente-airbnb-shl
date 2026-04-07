@@ -1,4 +1,4 @@
-// ASISTENTE IA AIRBNB Ã¢ÂÂ DIEGO NARANJO ÃÂ· v3.4 ÃÂ· ENVIO AUTOMATICO REAL
+// ASISTENTE IA AIRBNB ÃÂ¢ÃÂÃÂ DIEGO NARANJO ÃÂÃÂ· v3.4 ÃÂÃÂ· ENVIO AUTOMATICO REAL
 const express = require('express');
 const axios = require('axios');
 const FormData = require('form-data');
@@ -39,9 +39,11 @@ Lofts (2p): 301-306, 401-406 | Familiares: 101,201,202 | PH: 501
 Check-in: 3pm TODAS las propiedades | Check-out: 11am lofts | 12pm fam/PH
 Late checkout 2pm: $50.000 COP (sujeto disponibilidad)
 Acceso: TTLock porton + caja llaves fisica
+APTO 101: primer piso, 4 habitaciones
 Codigos caja: 101->2850|201->1607|202->0190|301->3676|302->9244|303->2713|304->9094|305->5961
 306->6457|401->8219|402->3253|403->9733|404->9034|405->1357|406->1486|501->2080
-Servicios: Parqueadero SOLO para moto $15.000/noche (no hay parqueadero para carro) | Lavanderia $7.000/turno piso5 (8-11am o 3-7pm, Nequi 3107541755)
+Servicios: Parqueadero SOLO para moto $15.000/noche (no hay parqueadero para carro)
+Edificio con ascensor | Lavanderia $7.000/turno piso5 (8-11am o 3-7pm, Nequi 3107541755)
 Limpieza $50.000 | Sabanas $25.000 | Lavado ropa $30.000
 Domicilios: CRA 73BIS #64A-67 + apto (no ubicacion del mapa)
 HOSPY: obligatorio. Sin registro = sin codigo TTLock.
@@ -66,6 +68,7 @@ TAYRONA: KM 37 Troncal | 4pm/11am | Wilfer: +57 321 7652591 | WiFi: BEACH SUITES
 PALOMINO: Parcelacion Ukua Casa C1 | piscina+playa privada
 CURITI: San Gil-Aratoca Km5 | 7 cabanas castillo medieval | piscina+jacuzzi
 
+PRECIOS: nunca dar precio total por chat, siempre decir que lo vean en la app de Airbnb
 ESTAFA cancelacion: solo reembolso si hay nueva reserva
 NUNCA dar telefono personal. NUNCA prometer sin confirmar.
 Firma: Equipo Super Host Loft
@@ -241,7 +244,7 @@ app.post('/test', async (req, res) => {
   try {
     const { mensaje, nombre, propiedad } = req.body;
     const respuesta = await generarRespuesta(
-      mensaje || 'ÃÂ¿A que hora es el check-in?',
+      mensaje || 'ÃÂÃÂ¿A que hora es el check-in?',
       nombre || 'Huesped de prueba',
       propiedad || 'Loft 301 cerca aeropuerto'
     );
@@ -258,4 +261,4 @@ app.get('/health', (req, res) => res.json({
   timestamp: new Date().toISOString()
 }));
 
-app.listen(CONFIG.PORT, () => console.log(`Asistente SHL v3.4 Ã¢ÂÂ Puerto ${CONFIG.PORT}`));
+app.listen(CONFIG.PORT, () => console.log(`Asistente SHL v3.4 ÃÂ¢ÃÂÃÂ Puerto ${CONFIG.PORT}`));
