@@ -1,7 +1,7 @@
-// ASISTENTE IA AIRBNB — DIEGO NARANJO · SuperHost Loft v3.3
-// Socket.IO v2 + auto-login + polling + correcciones aprendidas
+// ASISTENTE IA AIRBNB — DIEGO NARANJO · v3.4 · ENVIO AUTOMATICO REAL
 const express = require('express');
 const axios = require('axios');
+const FormData = require('form-data');
 const socketio = require('socket.io-client');
 const app = express();
 
@@ -47,35 +47,30 @@ Domicilios: CRA 73BIS #64A-67 + apto (no ubicacion del mapa)
 HOSPY: obligatorio. Sin registro = sin codigo TTLock.
 Agua Bogota: potable. Cafe: Sello Rojo.
 
-PH 501 BLACKLIVING — detalles importantes:
-- Habitacion principal: cama queen + bano privado con jacuzzi
-- TV: SOLO en habitacion principal y en la sala (las otras habitaciones NO tienen TV)
+PH 501 BLACKLIVING:
+- Hab principal: cama queen + bano privado con jacuzzi
+- TV: SOLO en habitacion principal y en la sala (otras habitaciones NO tienen TV)
 - Capacidad: hasta 6 personas
-- Precio referencia: $1.833.009 COP por 8 noches
 
-LA 33-805: Cra 7 #33-91 Edif Teleskop | porteria | 3pm/11am | WiFi: BPALOMINO/Airbnb805
-CANDELARIA 1210: Calle 18 #3-18 Edif Ventto | piso12 | caja: 9539 | 3pm/11am
-SANTA BARBARA 205: Calle 124 #21-10 Edif Toledo | cerradura digital | 3pm/11am
-COUNTRY 310: Calle 134C #12B-91 Edif Lecco | WiFi: Lecco310/Shloft310 | 3pm/11am
-RODADERO 401: Calle 17 #2-63 | Cod: 123456# | WiFi: Apartamento401 | 3pm/11am
-SANTA MARINA 1410: Cj Santa Marina Torre 2 (pedir Don Jaca) | caja:1621 | WiFi: SHLOFT1410 | 3pm/12pm
-Piscina 9am-9pm (no martes) | Manillas $29.200 | Late checkout: 50% extra
-Tiene aire acondicionado.
-TAYRONA: KM 37 Troncal (preguntar Casa Grande Surf) | 4pm/11am
-Wilfer: +57 321 7652591 | WiFi: BEACH SUITES/SUITES1621
+LA 33-805: Cra 7 #33-91 Edif Teleskop | WiFi: BPALOMINO/Airbnb805
+CANDELARIA 1210: Calle 18 #3-18 Edif Ventto | caja: 9539
+SANTA BARBARA 205: Calle 124 #21-10 Edif Toledo
+COUNTRY 310: Calle 134C #12B-91 Edif Lecco | WiFi: Lecco310/Shloft310
+RODADERO 401: Calle 17 #2-63 | Cod: 123456# | WiFi: Apartamento401
+SANTA MARINA 1410: Cj Santa Marina Torre 2 | caja:1621 | WiFi: SHLOFT1410 | tiene A/C
+Piscina 9am-9pm (no martes) | Manillas $29.200
+TAYRONA: KM 37 Troncal | 4pm/11am | Wilfer: +57 321 7652591 | WiFi: BEACH SUITES/SUITES1621
 PALOMINO: Parcelacion Ukua Casa C1 | piscina+playa privada
 CURITI: San Gil-Aratoca Km5 | 7 cabanas castillo medieval | piscina+jacuzzi
 
-Check-in 3pm | Early check-in: sujeto disponibilidad | Check-out: dejar llaves en cajita
-Late checkout: $50.000 hasta 2pm | Parqueadero: $15.000/noche
 ESTAFA cancelacion: solo reembolso si hay nueva reserva
 NUNCA dar telefono personal. NUNCA prometer sin confirmar.
-Firma: Equipo Super Host Loft (apto 101: Diego y Maritza)
+Firma: Equipo Super Host Loft
 TONO: Amable, colombiano, 2-3 parrafos, 1-2 emojis. Mismo idioma del huesped.`;
 
 async function loginIGMS() {
   try {
-    console.log('🔑 Renovando sesion IGMS...');
+    console.log('Renovando sesion IGMS...');
     const res = await axios.post('https://www.igms.com/api/user-api/login',
       { email: CONFIG.IGMS_EMAIL, password: CONFIG.IGMS_PASSWORD, platform: 'web' },
       { headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' }, maxRedirects: 5 }
@@ -87,12 +82,12 @@ async function loginIGMS() {
       if (match) {
         sesion.phpsessid = match[1];
         sesion.expira = Date.now() + 22 * 60 * 60 * 1000;
-        console.log('✅ Sesion IGMS renovada:', sesion.phpsessid.substring(0,8) + '...');
+        console.log('Sesion IGMS renovada OK');
         return true;
       }
     }
     return false;
-  } catch(e) { console.error('❌ Login error:', e.message); return false; }
+  } catch(e) { console.error('Login error:', e.message); return false; }
 }
 
 async function getSesion() {
@@ -109,6 +104,31 @@ async function generarRespuesta(mensaje, nombre, propiedad) {
   return res.data.content[0].text;
 }
 
+// ENVIO REAL via send-thread-action con FormData
+async function enviarMensaje(threadId, mensaje, phpsessid) {
+  try {
+    const form = new FormData();
+    form.append('thread_id', String(threadId));
+    form.append('action_data[action_type]', 'platform-message');
+    form.append('action_data[platform_type]', 'airbnb');
+    form.append('action_data[message]', mensaje);
+
+    const res = await axios.post(
+      'https://www.igms.com/api/user-api/send-thread-action',
+      form,
+      { headers: { ...form.getHeaders(), Cookie: `PHPSESSID=${phpsessid}`, 'User-Agent': 'Mozilla/5.0' } }
+    );
+    if (res.status === 200) {
+      console.log(`Mensaje enviado al thread ${threadId}`);
+      return true;
+    }
+    return false;
+  } catch(e) {
+    console.error('Error enviando mensaje:', e.message);
+    return false;
+  }
+}
+
 async function conectarSocket() {
   if (reconectando) return;
   reconectando = true;
@@ -122,21 +142,20 @@ async function conectarSocket() {
   });
   socket.on('connect', () => {
     socketConectado = true; reconectando = false;
-    console.log('✅ Socket IGMS conectado:', socket.id);
+    console.log('Socket IGMS conectado:', socket.id);
     socket.emit('identify', { clientId: CONFIG.IGMS_CLIENT_ID });
   });
   socket.on('disconnect', () => {
     socketConectado = false;
-    console.log('🔌 Socket desconectado');
+    console.log('Socket desconectado');
     setTimeout(() => { reconectando = false; conectarSocket(); }, 30000);
   });
   socket.on('connect_error', (err) => {
     socketConectado = false; reconectando = false;
-    console.error('❌ Socket error:', err.message?.substring(0, 60));
     setTimeout(() => conectarSocket(), 60000);
   });
   socket.on('new_message', async (data) => {
-    console.log('📩 Nuevo msg:', JSON.stringify(data).substring(0, 120));
+    console.log('Nuevo msg socket:', JSON.stringify(data).substring(0, 100));
     await procesarMensajeSocket(data);
   });
 }
@@ -150,13 +169,13 @@ async function polling() {
       { headers: { Cookie: `PHPSESSID=${phpsessid}`, 'User-Agent': 'Mozilla/5.0' } }
     );
     const threadIds = res.data?.data?.thread_ids || [];
-    if (threadIds.length > 0) console.log(`📬 ${threadIds.length} threads no leidos`);
-    for (const threadId of threadIds.slice(0, 3)) {
+    if (threadIds.length > 0) console.log(`${threadIds.length} threads no leidos`);
+    for (const threadId of threadIds.slice(0, 5)) {
       await procesarThread(threadId, phpsessid);
       await new Promise(r => setTimeout(r, 1500));
     }
   } catch(e) {
-    console.error('❌ Polling error:', e.message);
+    console.error('Polling error:', e.message);
     if (e.response?.status === 401 || e.response?.status === 403) sesion.expira = 0;
   }
 }
@@ -181,20 +200,20 @@ async function procesarThread(threadId, phpsessid) {
     const reservas = scope.Reservation?.data || {};
     const resKey = Object.keys(reservas)[0];
     const reserva = reservas[resKey] || {};
-    const propiedad = reserva.listing_name || 'Propiedad SuperHost Loft';
+    const propiedad = reserva.listing_name || data.listing_name || 'Propiedad SuperHost Loft';
     const nombre = reserva.guest_name || threadEvent.author_name || 'Huesped';
-    console.log(`📩 [${propiedad.substring(0,30)}] ${nombre}: "${mensaje.substring(0,60)}"`);
+    console.log(`Mensaje de ${nombre} [${propiedad.substring(0,25)}]: "${mensaje.substring(0,50)}"`);
     respondidos.add(lastEventId);
     const respuesta = await generarRespuesta(mensaje, nombre, propiedad);
-    await enviarRespuesta(threadId, respuesta, phpsessid);
-    console.log(`✅ Respondido a ${nombre}`);
-  } catch(e) { console.error('❌ Error thread:', e.message); }
+    const enviado = await enviarMensaje(threadId, respuesta, phpsessid);
+    if (enviado) console.log(`Respondido automaticamente a ${nombre}`);
+  } catch(e) { console.error('Error thread:', e.message); }
 }
 
 async function procesarMensajeSocket(data) {
   const msgId = data.event_id || data.id || (data.thread_id + '_' + Date.now());
   if (respondidos.has(msgId)) return;
-  const esHuesped = data.sent_by_host === false || data.from_host === false || data.is_incoming === true;
+  const esHuesped = data.sent_by_host === false || data.is_incoming === true;
   const mensaje = data.message || data.text || data.body || '';
   const threadId = data.thread_id || data.threadId;
   if (!mensaje || !threadId || !esHuesped) return;
@@ -204,36 +223,7 @@ async function procesarMensajeSocket(data) {
   const phpsessid = await getSesion();
   if (!phpsessid) return;
   const respuesta = await generarRespuesta(mensaje, nombre, propiedad);
-  await enviarRespuesta(threadId, respuesta, phpsessid);
-}
-
-async function enviarRespuesta(threadId, mensaje, phpsessid) {
-  if (socket && socketConectado) {
-    return new Promise((resolve) => {
-      const timeout = setTimeout(() => resolve(enviarHTTP(threadId, mensaje, phpsessid)), 3000);
-      socket.emit('send_message', { thread_id: threadId, message: mensaje }, (ack) => {
-        clearTimeout(timeout);
-        ack?.success ? resolve(true) : resolve(enviarHTTP(threadId, mensaje, phpsessid));
-      });
-    });
-  }
-  return enviarHTTP(threadId, mensaje, phpsessid);
-}
-
-async function enviarHTTP(threadId, mensaje, phpsessid) {
-  for (const ep of [
-    { url: 'https://www.igms.com/api/data/thread-reply', body: { thread_id: threadId, message: mensaje } },
-    { url: 'https://www.igms.com/api/inbox/reply', body: { threadId, message: mensaje } },
-  ]) {
-    try {
-      const r = await axios.post(ep.url, ep.body, {
-        headers: { Cookie: `PHPSESSID=${phpsessid}`, 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' }
-      });
-      if (r.status < 400) { console.log('✅ Enviado HTTP'); return true; }
-    } catch(e) { /* siguiente */ }
-  }
-  console.log('⚠️ Envio pendiente — endpoint HTTP no confirmado aun');
-  return false;
+  await enviarMensaje(threadId, respuesta, phpsessid);
 }
 
 (async () => {
@@ -241,6 +231,7 @@ async function enviarHTTP(threadId, mensaje, phpsessid) {
   await conectarSocket();
   setInterval(polling, 2 * 60 * 1000);
   setInterval(loginIGMS, 20 * 60 * 60 * 1000);
+  console.log('Asistente SHL v3.4 iniciado - envio automatico ACTIVO');
 })();
 
 app.post('/test', async (req, res) => {
@@ -249,18 +240,19 @@ app.post('/test', async (req, res) => {
     const respuesta = await generarRespuesta(
       mensaje || '¿A que hora es el check-in?',
       nombre || 'Huesped de prueba',
-      propiedad || 'Loft ideal para viajeros cerca al aeropuerto'
+      propiedad || 'Loft 301 cerca aeropuerto'
     );
     res.json({ ok: true, respuesta });
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/health', (req, res) => res.json({
-  status: '✅ Asistente activo',
-  version: '3.3',
-  socket: socketConectado ? '✅ conectado' : '⏳ reconectando',
-  sesion: sesion.phpsessid ? '✅ activa' : '❌ sin sesion',
+  status: 'Asistente activo',
+  version: '3.4',
+  envio: 'send-thread-action ACTIVO',
+  socket: socketConectado ? 'conectado' : 'reconectando',
+  sesion: sesion.phpsessid ? 'activa' : 'sin sesion',
   timestamp: new Date().toISOString()
 }));
 
-app.listen(CONFIG.PORT, () => console.log(`🏨 Asistente SHL v3.3 — Puerto ${CONFIG.PORT}`));
+app.listen(CONFIG.PORT, () => console.log(`Asistente SHL v3.4 — Puerto ${CONFIG.PORT}`));
