@@ -490,7 +490,7 @@ app.get('/health', (req, res) => res.json({
   version: VERSION,
   socket: socketConectado ? 'conectado' : 'reconectando',
   sesion: sesion.phpsessid ? 'activa' : 'sin sesion',
-  polling    : CFG.IGMS_EMAIL ? 'activo cada 30s' : 'sin credenciales IGMS',
+  polling    : CONFIG.IGMS_EMAIL ? 'activo cada 30s' : 'sin credenciales IGMS',
   timestamp: new Date().toISOString()
 }));
 
