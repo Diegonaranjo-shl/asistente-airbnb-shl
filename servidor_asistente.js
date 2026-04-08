@@ -1,6 +1,7 @@
 // ===========================================================
 // ASISTENTE IA AIRBNB - SUPERHOST LOFT
-// servidor_asistente.js  v5.0
+// servidor_asistente.js  v5.1
+// Autenticacion IGMS via OAuth (email + password + client_id)
 // ===========================================================
 
 const express = require('express');
@@ -8,11 +9,13 @@ const axios   = require('axios');
 const app     = express();
 app.use(express.json());
 
-const VERSION = '5.0';
+const VERSION = '5.1';
 
 const CFG = {
   ANTHROPIC_API_KEY : process.env.ANTHROPIC_API_KEY,
-  IGMS_API_KEY      : process.env.IGMS_API_KEY,
+  IGMS_EMAIL        : process.env.IGMS_EMAIL,
+  IGMS_PASSWORD     : process.env.IGMS_PASSWORD,
+  IGMS_CLIENT_ID    : process.env.IGMS_CLIENT_ID,
   WHATSAPP_API_KEY  : process.env.WHATSAPP_API_KEY,
   DIEGO_WHATSAPP    : process.env.DIEGO_WHATSAPP,
   PORT              : process.env.PORT || 3000,
@@ -74,9 +77,11 @@ Responder: 'Unicamente si recibimos reserva en las mismas fechas podriamos hacer
 TONO: Espanol colombiano natural, amable, max 3-4 parrafos, emojis moderados (1-2).
 Nunca dar telefono personal. Firma siempre como: Equipo SuperHost Loft.`;
 
-// ============================================================
-// HISTORIAL POR CONVERSACION
-// ============================================================
+// ===========================================================
+// ESTADO
+// ===========================================================
+let igmsToken    = null;
+let igmsTokenExp = 0;
 const conversations = new Map();
 
 function getHistory(threadId) {
@@ -84,23 +89,57 @@ function getHistory(threadId) {
   return conversations.get(threadId);
 }
 
-// ============================================================
-// DETECCION DE URGENCIAS
-// ============================================================
+// ===========================================================
+// IGMS AUTH: obtener token OAuth
+// ===========================================================
+async function getIgmsToken() {
+  const now = Date.now();
+  if (igmsToken && now < igmsTokenExp) return igmsToken;
+
+  if (!CFG.IGMS_EMAIL || !CFG.IGMS_PASSWORD || !CFG.IGMS_CLIENT_ID) {
+    console.log('[IGMS] Credenciales OAuth no configuradas');
+    return null;
+  }
+
+  console.log('[IGMS] Obteniendo token OAuth...');
+  try {
+    const res = await axios.post(
+      'https://www.igms.com/api/v1/oauth/token',
+      {
+        grant_type : 'password',
+        username   : CFG.IGMS_EMAIL,
+        password   : CFG.IGMS_PASSWORD,
+        client_id  : CFG.IGMS_CLIENT_ID,
+      },
+      { headers: { 'Content-Type': 'application/json' }, timeout: 15000 }
+    );
+    igmsToken    = res.data.access_token;
+    igmsTokenExp = now + ((res.data.expires_in || 3600) - 300) * 1000;
+    console.log('[IGMS] Token OK, expira en ' + Math.round((igmsTokenExp - now) / 60000) + ' min');
+    return igmsToken;
+  } catch (err) {
+    console.error('[IGMS] Error OAuth: ' + err.message);
+    if (err.response) console.error('[IGMS] ' + err.response.status + ' | ' + JSON.stringify(err.response.data).substring(0, 200));
+    return null;
+  }
+}
+
+// ===========================================================
+// URGENCIAS
+// ===========================================================
 const URGENT_KW = [
   'emergencia','urgente','inundacion','incendio','robo','herido',
   'sin agua','sin luz','no hay agua','no hay luz','llave adentro',
   'no puedo entrar','accidente','medico'
 ];
-
 function isUrgent(msg) {
   const l = msg.toLowerCase();
   return URGENT_KW.some(k => l.includes(k));
 }
 
-// ============================================================
-// GENERAR RESPUESTA CON CLAUDE
-// ============================================================
+// ===========================================================
+// CLAUDE IA
+// ===========================================================
 async function generateResponse(guestMessage, guestName, propertyName, threadId) {
   const history = getHistory(threadId);
   const userContent = 'Propiedad: ' + propertyName + '\nHuesped: ' + guestName + '\nMensaje: "' + guestMessage + '"';
@@ -129,14 +168,14 @@ async function generateResponse(guestMessage, guestName, propertyName, threadId)
   return reply;
 }
 
-// ============================================================
-// ALERTA WHATSAPP A DIEGO
-// ============================================================
+// ===========================================================
+// WHATSAPP ALERTA
+// ===========================================================
 async function alertDiego(guestName, propertyName, message, aiResponse) {
   if (!CFG.WHATSAPP_API_KEY || !CFG.DIEGO_WHATSAPP) return;
-  const text = 'ALERTA URGENTE - Asistente Airbnb\n' +
-    'Huesped: ' + guestName + '\nPropiedad: ' + propertyName +
-    '\nMensaje: "' + message + '"\nRespuesta: "' + aiResponse.substring(0, 200) + '..."';
+  const text = 'ALERTA URGENTE - Asistente Airbnb\nHuesped: ' + guestName +
+    '\nPropiedad: ' + propertyName + '\nMensaje: "' + message +
+    '"\nRespuesta: "' + aiResponse.substring(0, 200) + '..."';
   await axios.post(
     'https://waba.360dialog.io/v1/messages',
     { messaging_product: 'whatsapp', to: CFG.DIEGO_WHATSAPP, type: 'text', text: { body: text } },
@@ -145,75 +184,92 @@ async function alertDiego(guestName, propertyName, message, aiResponse) {
   console.log('[WA] Alerta enviada a Diego');
 }
 
-// ============================================================
-// RESPONDER EN AIRBNB VIA IGMS
-// ============================================================
+// ===========================================================
+// RESPONDER EN AIRBNB
+// ===========================================================
 async function replyOnAirbnb(threadId, message) {
-  if (!CFG.IGMS_API_KEY) {
-    console.log('[IGMS] Sin API key configurada');
+  const token = await getIgmsToken();
+  if (!token) { console.log('[IGMS] Sin token'); return; }
+
+  // Intentar endpoint principal
+  try {
+    await axios.post(
+      'https://www.igms.com/api/v1/messaging/threads/' + threadId + '/messages',
+      { message: message },
+      { headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' } }
+    );
+    console.log('[IGMS] Respuesta enviada en thread ' + threadId);
     return;
+  } catch (err) {
+    console.error('[IGMS] Endpoint principal fallo: ' + err.message);
   }
-  await axios.post(
-    'https://api.igms.com/v1/messaging/send',
-    { thread_id: threadId, message: message },
-    { headers: { 'Authorization': 'Bearer ' + CFG.IGMS_API_KEY, 'Content-Type': 'application/json' } }
-  );
-  console.log('[IGMS] Respuesta enviada en thread ' + threadId);
+
+  // Endpoint alternativo
+  try {
+    await axios.post(
+      'https://www.igms.com/api/v1/conversations/' + threadId + '/messages',
+      { text: message },
+      { headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' } }
+    );
+    console.log('[IGMS] Respuesta enviada (alt) en thread ' + threadId);
+  } catch (err2) {
+    console.error('[IGMS] Ambos endpoints fallaron: ' + err2.message);
+  }
 }
 
-// ============================================================
-// POLLING: Revisar mensajes nuevos en IGMS cada 90 segundos
-// ============================================================
+// ===========================================================
+// POLLING cada 90 segundos
+// ===========================================================
 const processedMessages = new Set();
 
 async function pollNewMessages() {
-  if (!CFG.IGMS_API_KEY) {
-    console.log('[POLL] Sin IGMS_API_KEY - polling desactivado');
-    return;
-  }
-  console.log('[POLL] Revisando mensajes nuevos... ' + new Date().toISOString());
+  const token = await getIgmsToken();
+  if (!token) { console.log('[POLL] Sin token IGMS'); return; }
 
+  console.log('[POLL] Revisando... ' + new Date().toISOString());
   try {
     const res = await axios.get(
-      'https://api.igms.com/v1/messaging/threads',
+      'https://www.igms.com/api/v1/messaging/threads',
       {
         params : { status: 'active', limit: 20 },
-        headers: { 'Authorization': 'Bearer ' + CFG.IGMS_API_KEY, 'Content-Type': 'application/json' },
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
         timeout: 15000,
       }
     );
 
-    const threads = res.data.data || res.data.threads || res.data || [];
-    console.log('[POLL] Threads encontrados: ' + threads.length);
+    const raw     = res.data;
+    const threads = raw.data || raw.threads || raw.items || (Array.isArray(raw) ? raw : []);
+    console.log('[POLL] Threads: ' + threads.length);
 
     for (const thread of threads) {
       const threadId = thread.id || thread.thread_id;
-      const lastMsg  = thread.last_message || (thread.messages && thread.messages[thread.messages.length - 1]);
+      const lastMsg  = thread.last_message || thread.lastMessage
+        || (thread.messages && thread.messages[thread.messages.length - 1]);
+
       if (!lastMsg) continue;
 
-      const msgId   = lastMsg.id || (threadId + '_' + lastMsg.created_at);
-      const role    = lastMsg.role || lastMsg.sender_type || '';
-      const isGuest = role === 'guest' || role === 'traveler' || role === 'renter';
+      const msgId   = lastMsg.id || (threadId + '_' + (lastMsg.created_at || lastMsg.createdAt || ''));
+      const role    = lastMsg.role || lastMsg.sender_type || lastMsg.senderType || lastMsg.author_type || '';
+      const isGuest = role === 'guest' || role === 'traveler' || role === 'renter' || role === 'customer';
 
       if (!isGuest || processedMessages.has(msgId)) continue;
 
       processedMessages.add(msgId);
-      if (processedMessages.size > 500) {
-        processedMessages.delete(processedMessages.values().next().value);
-      }
+      if (processedMessages.size > 500) processedMessages.delete(processedMessages.values().next().value);
 
-      const guestMessage = lastMsg.message || lastMsg.body || lastMsg.text || '';
-      const guestName    = thread.guest_name || (thread.guest && thread.guest.name) || 'Huesped';
-      const propertyName = thread.property_name || (thread.listing && thread.listing.name) || 'Propiedad SHL';
+      const guestMessage = lastMsg.message || lastMsg.body || lastMsg.text || lastMsg.content || '';
+      const guestName    = thread.guest_name || thread.guestName
+        || (thread.guest && (thread.guest.name || thread.guest.full_name)) || 'Huesped';
+      const propertyName = thread.property_name || thread.propertyName
+        || (thread.listing && (thread.listing.name || thread.listing.title)) || 'Propiedad SHL';
 
       if (!guestMessage.trim()) continue;
-
-      console.log('[POLL] Nuevo mensaje de ' + guestName + ': "' + guestMessage.substring(0, 80) + '"');
+      console.log('[POLL] Msg de ' + guestName + ': "' + guestMessage.substring(0, 80) + '"');
 
       try {
         const reply = await generateResponse(guestMessage, guestName, propertyName, threadId);
         await replyOnAirbnb(threadId, reply);
-        console.log('[POLL] Respuesta enviada a ' + guestName);
+        console.log('[POLL] Respondido a ' + guestName);
         if (isUrgent(guestMessage)) await alertDiego(guestName, propertyName, guestMessage, reply);
       } catch (err) {
         console.error('[POLL] Error en msg de ' + guestName + ': ' + err.message);
@@ -222,7 +278,8 @@ async function pollNewMessages() {
   } catch (err) {
     console.error('[POLL] Error: ' + err.message);
     if (err.response) {
-      console.error('[POLL] Status: ' + err.response.status + ' | Data: ' + JSON.stringify(err.response.data).substring(0, 300));
+      console.error('[POLL] Status: ' + err.response.status);
+      if (err.response.status === 401) { igmsToken = null; igmsTokenExp = 0; }
     }
   }
 }
@@ -231,36 +288,29 @@ setInterval(pollNewMessages, 90000);
 setTimeout(pollNewMessages, 5000);
 console.log('[POLL] Polling iniciado cada 90s');
 
-// ============================================================
-// WEBHOOK: Mensaje nuevo
-// ============================================================
+// ===========================================================
+// ENDPOINTS
+// ===========================================================
 app.post('/webhook/message', async (req, res) => {
   const { threadId, conversationId, guestName, propertyName, message } = req.body;
   const tid = threadId || conversationId;
   if (!message || !tid) return res.status(400).json({ error: 'Faltan threadId y message' });
-  console.log('[WEBHOOK] Msg de ' + (guestName || 'Huesped') + ': "' + message.substring(0, 80) + '"');
   try {
     const reply = await generateResponse(message, guestName || 'Huesped', propertyName || 'Propiedad SHL', tid);
     await replyOnAirbnb(tid, reply);
     if (isUrgent(message)) await alertDiego(guestName, propertyName, message, reply);
     res.json({ success: true, reply });
   } catch (err) {
-    console.error('[WEBHOOK] Error: ' + err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ============================================================
-// WEBHOOK: Nueva reserva
-// ============================================================
 app.post('/webhook/reservation', async (req, res) => {
   const { guestName, propertyName, checkIn, checkOut, threadId } = req.body;
-  console.log('[RESERVA] ' + guestName + ' en ' + propertyName);
   try {
     const welcomeMsg = await generateResponse(
       'SISTEMA: reserva confirmada. Genera mensaje de bienvenida. Check-in: ' + checkIn + '. Check-out: ' + checkOut + '.',
-      guestName || 'Huesped',
-      propertyName || 'Propiedad SHL',
+      guestName || 'Huesped', propertyName || 'Propiedad SHL',
       threadId || ('reserva_' + Date.now())
     );
     if (threadId) await replyOnAirbnb(threadId, welcomeMsg);
@@ -270,18 +320,12 @@ app.post('/webhook/reservation', async (req, res) => {
   }
 });
 
-// ============================================================
-// WEBHOOK: Check-out
-// ============================================================
 app.post('/webhook/checkout', async (req, res) => {
   const { guestName, propertyName, checkoutTime, nextCheckin } = req.body;
-  console.log('[CHECKOUT] ' + guestName + ' salio de ' + propertyName);
   if (CFG.WHATSAPP_API_KEY && CFG.DIEGO_WHATSAPP) {
-    const msg = 'ASEO REQUERIDO\nPropiedad: ' + propertyName +
-      '\nCheck-out: ' + guestName + ' a las ' + checkoutTime +
-      '\nProximo check-in: ' + (nextCheckin || 'Por confirmar');
-    axios.post(
-      'https://waba.360dialog.io/v1/messages',
+    const msg = 'ASEO REQUERIDO\nPropiedad: ' + propertyName + '\nCheck-out: ' + guestName +
+      ' a las ' + checkoutTime + '\nProximo check-in: ' + (nextCheckin || 'Por confirmar');
+    axios.post('https://waba.360dialog.io/v1/messages',
       { messaging_product: 'whatsapp', to: CFG.DIEGO_WHATSAPP, type: 'text', text: { body: msg } },
       { headers: { 'D360-API-KEY': CFG.WHATSAPP_API_KEY, 'Content-Type': 'application/json' } }
     ).catch(e => console.error('[CHECKOUT] WA error: ' + e.message));
@@ -289,15 +333,12 @@ app.post('/webhook/checkout', async (req, res) => {
   res.json({ success: true });
 });
 
-// ============================================================
-// TEST: Simular mensaje manual
-// ============================================================
 app.post('/test/message', async (req, res) => {
   const { message, guestName, propertyName } = req.body;
   try {
     const reply = await generateResponse(
       message || 'A que hora es el check-in?',
-      guestName  || 'Cliente de prueba',
+      guestName || 'Cliente de prueba',
       propertyName || 'Loft 301 Bogota',
       'test_' + Date.now()
     );
@@ -307,36 +348,46 @@ app.post('/test/message', async (req, res) => {
   }
 });
 
-// ============================================================
-// FORZAR POLLING MANUAL
-// ============================================================
 app.post('/poll/force', async (req, res) => {
-  console.log('[POLL] Forzado manualmente');
   pollNewMessages().catch(console.error);
   res.json({ success: true, message: 'Polling iniciado' });
 });
 
-// ============================================================
-// HEALTH CHECK
-// ============================================================
+// Verificar conexion IGMS
+app.get('/igms/test', async (req, res) => {
+  try {
+    const token = await getIgmsToken();
+    if (!token) return res.json({ ok: false, error: 'No se pudo obtener token. Verificar IGMS_EMAIL, IGMS_PASSWORD, IGMS_CLIENT_ID' });
+    const r = await axios.get(
+      'https://www.igms.com/api/v1/messaging/threads',
+      { params: { limit: 5 }, headers: { 'Authorization': 'Bearer ' + token }, timeout: 10000 }
+    );
+    const raw = r.data;
+    const threads = raw.data || raw.threads || raw.items || (Array.isArray(raw) ? raw : []);
+    res.json({ ok: true, token: 'obtenido', threads_encontrados: threads.length });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, status: err.response && err.response.status, data: err.response && err.response.data });
+  }
+});
+
 app.get('/health', (req, res) => {
+  const igmsOk = !!(CFG.IGMS_EMAIL && CFG.IGMS_PASSWORD && CFG.IGMS_CLIENT_ID);
   res.json({
-    status     : 'Asistente activo',
-    version    : VERSION,
-    propietario: 'Diego Naranjo - SuperHost Loft',
-    propiedades: 33,
-    polling    : CFG.IGMS_API_KEY ? 'activo cada 90s' : 'sin IGMS_API_KEY',
-    timestamp  : new Date().toISOString(),
+    status      : 'Asistente activo',
+    version     : VERSION,
+    propietario : 'Diego Naranjo - SuperHost Loft',
+    propiedades : 33,
+    igms_auth   : igmsOk ? 'credenciales OK' : 'faltan credenciales',
+    token_activo: igmsToken ? 'si' : 'pendiente (5s)',
+    polling     : igmsOk ? 'activo cada 90s' : 'sin credenciales IGMS',
+    timestamp   : new Date().toISOString(),
   });
 });
 
-// ============================================================
-// ARRANCAR SERVIDOR
-// ============================================================
 app.listen(CFG.PORT, () => {
   console.log('===========================================');
   console.log('  Asistente SHL v' + VERSION + ' - Puerto ' + CFG.PORT);
-  console.log('  IGMS polling: ' + (CFG.IGMS_API_KEY ? 'ACTIVO' : 'SIN API KEY'));
-  console.log('  WhatsApp:     ' + (CFG.WHATSAPP_API_KEY ? 'ACTIVO' : 'SIN API KEY'));
+  console.log('  IGMS OAuth: ' + (CFG.IGMS_EMAIL ? 'credenciales OK' : 'SIN CREDENCIALES'));
+  console.log('  WhatsApp:   ' + (CFG.WHATSAPP_API_KEY ? 'ACTIVO' : 'SIN API KEY'));
   console.log('===========================================');
 });
