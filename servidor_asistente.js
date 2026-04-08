@@ -51,7 +51,10 @@ APTO 301: WiFi principal BLANCA_5G
 Codigos caja: 101->2850|201->1607|202->0190|301->3676|302->9244|303->2713|304->9094|305->5961
 306->6457|401->8219|402->3253|403->9733|404->9034|405->1357|406->1486|501->2080
 Servicios: Parqueadero SOLO para moto $15.000/noche (no hay parqueadero para carro)
-Edificio con ascensor | Lavanderia $7.000/turno piso5 (8-11am o 3-7pm, Nequi 3107541755)
+Edificio con ascensor | Lavanderia $7.000/turno piso5 (8-11am o 3-7pm, Nequi 3107541755 Maritza Mora)
+- Costo lavanderia SI aparece en los servicios del anuncio de Airbnb
+- Huesped sin Nequi o extranjero: enviar cobro directamente por Airbnb (solicitud de pago desde la plataforma)
+- Pago con tarjeta internacional: siempre cobrar por Airbnb
 - Maquinas: usar 3 y 4
 - Codigo acceso: cambia diariamente, se envia el dia del turno
 - Pago: Nequi 3107541755 Maritza Mora O por Airbnb (para extranjeros o sin Nequi)
