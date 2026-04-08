@@ -390,9 +390,17 @@ async function procesarThread(threadId, phpsessid) {
     if (!lastEventId || respondidos.has(lastEventId)) return;
     const threadEvent = scope.PlatformThreadEvent?.data?.[lastEventId];
     if (!threadEvent) return;
-    const esHuesped = threadEvent.sent_by_host === false || threadEvent.is_incoming === true;
+    // sent_by_host puede ser false, 0, null, undefined segun la version de IGMS
+    // Si no existe el campo, asumir que es del huesped (no del host)
+    const esHost = threadEvent.sent_by_host === true || threadEvent.sent_by_host === 1;
     const mensaje = threadEvent.message || threadEvent.body || '';
-    if (!esHuesped || !mensaje || mensaje.length < 2) return;
+    if (esHost || !mensaje || mensaje.length < 2) return;
+    console.log('[Thread] Campos del evento:', JSON.stringify({
+      sent_by_host: threadEvent.sent_by_host,
+      is_incoming: threadEvent.is_incoming,
+      author_type: threadEvent.author_type,
+      role: threadEvent.role
+    }));
     const reservas = scope.Reservation?.data || {};
     const resKey = Object.keys(reservas)[0];
     const reserva = reservas[resKey] || {};
@@ -412,10 +420,16 @@ async function procesarThread(threadId, phpsessid) {
 async function procesarMensajeSocket(data) {
   const msgId = data.event_id || data.id || (data.thread_id + '_' + Date.now());
   if (respondidos.has(msgId)) return;
-  const esHuesped = data.sent_by_host === false || data.is_incoming === true;
+  const esHost = data.sent_by_host === true || data.sent_by_host === 1;
   const mensaje = data.message || data.text || data.body || '';
   const threadId = data.thread_id || data.threadId;
-  if (!mensaje || !threadId || !esHuesped) return;
+  if (!mensaje || !threadId || esHost) return;
+  console.log('[Socket] Campos msg:', JSON.stringify({
+    sent_by_host: data.sent_by_host,
+    is_incoming: data.is_incoming,
+    event_type: data.event_type,
+    thread_id: threadId
+  }));
   respondidos.add(msgId);
   if (respondidos.size > 500) respondidos.delete(respondidos.values().next().value);
   const nombre = data.guest_name || data.author || 'Huesped';
