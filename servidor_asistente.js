@@ -1,7 +1,6 @@
 // ASISTENTE IA AIRBNB - SUPERHOST LOFT
-// servidor_asistente.js v5.2
-// Restaurado al mecanismo v3.4 que funcionaba:
-// login IGMS -> PHPSESSID -> WebSocket + polling + send-thread-action
+// servidor_asistente.js v5.3
+// Fix: setInterval fuera del bloque async para garantizar ejecucion
 
 const express = require('express');
 const axios = require('axios');
@@ -19,7 +18,7 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 
-const VERSION = '5.2';
+const VERSION = '5.3';
 
 const CONFIG = {
   ANTHROPIC_API_KEY:    process.env.ANTHROPIC_API_KEY,
@@ -98,7 +97,7 @@ async function generarCodigoTTLock(lockId, nombre) {
 }
 
 // ===========================================================
-// SYSTEM PROMPT ACTUALIZADO
+// SYSTEM PROMPT
 // ===========================================================
 const SYSTEM_PROMPT = `Eres el asistente virtual del equipo SuperHost Loft de Diego Naranjo y Maritza.
 Superhost verificado de Airbnb con 33+ propiedades en Colombia.
@@ -106,42 +105,41 @@ Superhost verificado de Airbnb con 33+ propiedades en Colombia.
 REGLA PRINCIPAL: Airbnb ya envia bienvenida+Hospy, check-in, check-out y resena automaticamente.
 NO los repitas. Solo responde preguntas del huesped.
 
-BLACKLIVING: Cra 73 Bis #64A-67, Engativa, Bogota. Maps: https://g.co/kgs/e2irUV
+BLACKLIVING: Cra 73 Bis 64A-67, Engativa, Bogota. Maps: https://g.co/kgs/e2irUV
 Lofts (2p): 301-306, 401-406 | Familiares: 101,201,202 | PH: 501
 Check-in: 3pm TODAS las propiedades | Check-out: 11am lofts | 12pm fam/PH
 Late checkout 2pm: $50.000 COP (sujeto disponibilidad)
-Acceso: TTLock porton + caja llaves fisica
 Codigos caja: 101->2850|201->1607|202->0190|301->3676|302->9244|303->2713|304->9094|305->5961
 306->6457|401->8219|402->3253|403->9733|404->9034|405->1357|406->1486|501->2080
 Parqueadero: GRATIS para estadias cortas. Solo para MOTO (no hay para carro).
-Para estadias de mas de 30 dias: $35.000 COP MENSUAL.
+Estadias mas de 30 dias: $35.000 COP MENSUAL.
 Edificio con ascensor | Lavanderia $7.000/turno piso5 (8-11am o 3-7pm, Nequi 3107541755 Maritza Mora)
-Domicilios: CRA 73BIS #64A-67 + apto (no ubicacion del mapa)
+Domicilios: CRA 73BIS 64A-67 + num apto (no ubicacion del mapa)
 Agua Bogota: potable. Cafe: Sello Rojo.
 WIFI BLACKLIVING: si cae red principal, alternativas: HOST-101, APTO30422, APTO40122
 HOSPY: obligatorio. Sin registro = sin codigo TTLock.
+APTO 101: primer piso, 4 habitaciones
+APTO 201: TV en una habitacion y en la sala.
+PH 501: terraza privada | hab principal cama queen + bano privado con jacuzzi | hasta 8 personas
 
-PH 501: terraza privada | hab principal cama queen + bano privado con jacuzzi
-Capacidad hasta 8 personas | TV en hab principal y sala
-
-LA 33-805: Cra 7 #33-91 Edif Teleskop
-CANDELARIA 1210: Calle 18 #3-18 Edif Ventto | caja: 9539
-SANTA BARBARA 205: Calle 124 #21-10 Edif Toledo
-COUNTRY 310: Edificio LECCO, Calle 134c #12b-91, Apto 310. Estadias largas +30 dias: $35.000 mensual parqueadero.
-RODADERO 401 (Santa Marta): Calle 17 #2-63, Edif Manzanares, Apto 401. Check-in hasta 10pm presencial. Encargada: Yurani.
-SANTA MARINA 1410: Torre 2, Apto 1410, Conj Santa Marina, sector Don Jaca. Manillas condominio: $29.200/persona.
+LA 33-805: Cra 7 33-91 Edif Teleskop (estadias largas)
+CANDELARIA 1210: Calle 18 3-18 Edif Ventto | caja: 9539
+SANTA BARBARA 205: Calle 124 21-10 Edif Toledo
+COUNTRY 310: Edif LECCO, Calle 134c 12b-91, Apto 310. Parqueadero solo moto. Estadias +30 dias: $35.000 mensual.
+RODADERO 401 (Santa Marta): Calle 17 2-63, Edif Manzanares. Check-in hasta 10pm presencial. Encargada: Yurani.
+SANTA MARINA 1410: Torre 2, Apto 1410, Conj Santa Marina, sector Don Jaca. Manillas: $29.200/persona.
 TAYRONA: KM 37 Troncal | 4pm/11am | Wilfer: +57 321 7652591
 PALOMINO: Parcelacion Ukua Casa C1 | piscina+playa privada
-CURITÌ GLAMPING CASTILLO: 7 cabanas, banos compartidos, sin desayuno incluido, sin nevera en cabanas.
+CURITÌ CASTILLO: 7 cabanas, banos compartidos, sin desayuno, sin nevera en cabanas.
 
-PRECIOS: nunca dar precio total por chat, siempre decir que lo vean en la app de Airbnb.
+PRECIOS: nunca dar precio total, decir que lo vean en la app Airbnb.
 ESTAFA cancelacion: solo reembolso si hay nueva reserva en las mismas fechas.
 NUNCA dar telefono personal. NUNCA prometer sin confirmar.
 Firma: Equipo Super Host Loft
 TONO: Amable, colombiano, 2-3 parrafos, 1-2 emojis. Mismo idioma del huesped.`;
 
 // ===========================================================
-// CODIGOS CAJA Y UTILIDADES CHECKIN
+// CODIGOS CAJA Y CHECKIN
 // ===========================================================
 const CODIGOS_CAJA = {
   101:2850, 201:1607, 202:190, 301:3676, 302:9244, 303:2713,
@@ -172,32 +170,26 @@ async function generarMensajeCheckin(nombre, propiedad) {
     const codigo = await generarCodigoTTLock(CONFIG.TTLOCK_LOCK_PORTON, nombre);
     if (codigo) codigoPorton = codigo;
   }
-  return `Hola ${nombre}
-El personal del edificio tendra una autorizacion para permitir tu ingreso.
-
-EDIFICIO PORTON NEGRO
-Direccion: Cra 73bis #64A-67 - APTO ${numApto}
-https://g.co/kgs/e2irUV
-
-La puerta del edificio es con cerradura de teclado:
-1. Frota la mano en la parte de arriba hasta que se prenda el teclado.
-2. Ingresa el CODIGO: ${codigoPorton}# (el signo # va al final)
-3. Baja la manija negra para abrir la puerta.
-4. Una vez adentro cierra y sube la manija negra para asegurar.
-
-Junto a la puerta del apto encontraras la caja de llaves:
-Alinea el codigo, baja la palanca negra y hala la tapa.
-CODIGO DE CAJA DE LLAVES: ${codigoCaja}
-
-Encontraras 3 llaves:
-- Llave puerta principal (doble llave despues de las 10pm)
-- Llave de emergencia (debe permanecer en la cajita)
-- Tarjeta negra: acceso sin codigo al edificio
-
-Perdida de llaves: 10 USD
-
-Saludos!
-Equipo Super Host Loft`;
+  return 'Hola ' + nombre + '\n' +
+    'El personal del edificio tendra una autorizacion para permitir tu ingreso.\n\n' +
+    'EDIFICIO PORTON NEGRO\n' +
+    'Direccion: Cra 73bis 64A-67 - APTO ' + numApto + '\n' +
+    'https://g.co/kgs/e2irUV\n\n' +
+    'La puerta del edificio es con cerradura de teclado:\n' +
+    '1. Frota la mano en la parte de arriba hasta que se prenda el teclado.\n' +
+    '2. Ingresa el CODIGO: ' + codigoPorton + '# (el signo # va al final)\n' +
+    '3. Baja la manija negra para abrir la puerta.\n' +
+    '4. Una vez adentro cierra y sube la manija negra para asegurar.\n\n' +
+    'Junto a la puerta del apto encontraras la caja de llaves:\n' +
+    'Alinea el codigo, baja la palanca negra y hala la tapa.\n' +
+    'CODIGO DE CAJA DE LLAVES: ' + codigoCaja + '\n\n' +
+    'Encontraras 3 llaves:\n' +
+    '- Llave puerta principal (doble llave despues de las 10pm)\n' +
+    '- Llave de emergencia (debe permanecer en la cajita)\n' +
+    '- Tarjeta negra: acceso sin codigo al edificio\n\n' +
+    'Perdida de llaves: 10 USD\n\n' +
+    'Saludos!\n' +
+    'Equipo Super Host Loft';
 }
 
 const reservasPendientes = {};
@@ -209,11 +201,11 @@ async function programarCheckin(threadId, nombre, propiedad, fechaCheckin, phpse
     const msg = await generarMensajeCheckin(nombre, propiedad);
     if (msg) {
       await enviarMensaje(threadId, msg, phpsessid);
-      console.log('[Check-in] Enviado a ' + nombre + ' - ' + propiedad);
+      console.log('[Checkin] Enviado a ' + nombre);
     }
   } else {
     reservasPendientes[threadId] = { nombre, propiedad, fechaCheckin };
-    console.log('[Check-in] Programado para ' + nombre + ' - ' + fechaCheckin);
+    console.log('[Checkin] Programado para ' + nombre + ' - ' + fechaCheckin);
   }
 }
 
@@ -226,7 +218,7 @@ setInterval(async () => {
         const msg = await generarMensajeCheckin(r.nombre, r.propiedad);
         if (msg) {
           await enviarMensaje(threadId, msg, phpsessid);
-          console.log('[Check-in auto] ' + r.nombre + ' - ' + r.propiedad);
+          console.log('[Checkin auto] ' + r.nombre);
           delete reservasPendientes[threadId];
         }
       }
@@ -256,11 +248,10 @@ async function loginIGMS() {
         return true;
       }
     }
-    console.error('[IGMS] No se encontro PHPSESSID en la respuesta');
+    console.error('[IGMS] No se encontro PHPSESSID');
     return false;
   } catch(e) {
     console.error('[IGMS] Login error:', e.message);
-    if (e.response) console.error('[IGMS] Status:', e.response.status);
     return false;
   }
 }
@@ -288,7 +279,7 @@ async function generarRespuesta(mensaje, nombre, propiedad) {
 }
 
 // ===========================================================
-// ENVIAR MENSAJE VIA send-thread-action
+// ENVIAR MENSAJE
 // ===========================================================
 async function enviarMensaje(threadId, mensaje, phpsessid) {
   try {
@@ -337,9 +328,8 @@ async function conectarSocket() {
     console.log('[Socket] Desconectado, reconectando en 30s...');
     setTimeout(() => { reconectando = false; conectarSocket(); }, 30000);
   });
-  socket.on('connect_error', (err) => {
+  socket.on('connect_error', () => {
     socketConectado = false; reconectando = false;
-    console.log('[Socket] Error conexion, reintentando en 60s...');
     setTimeout(() => conectarSocket(), 60000);
   });
   socket.on('new_message', async (data) => {
@@ -349,25 +339,25 @@ async function conectarSocket() {
 }
 
 // ===========================================================
-// POLLING cada 2 minutos (respaldo al socket)
+// POLLING cada 30 segundos
 // ===========================================================
 async function polling() {
   try {
     const phpsessid = await getSesion();
-    if (!phpsessid) return;
+    if (!phpsessid) { console.log('[Poll] Sin sesion IGMS'); return; }
     const res = await axios.get(
       'https://www.igms.com/api/data/threads?filters[limit]=20&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
       { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
     );
-    const threadIds = res.data?.data?.thread_ids || [];
-    if (threadIds.length > 0) console.log('[Poll] ' + threadIds.length + ' threads no leidos');
+    const threadIds = res.data && res.data.data && res.data.data.thread_ids ? res.data.data.thread_ids : [];
+    console.log('[Poll] ' + (threadIds.length > 0 ? threadIds.length + ' threads encontrados' : 'sin mensajes nuevos'));
     for (const threadId of threadIds.slice(0, 5)) {
       await procesarThread(threadId, phpsessid);
       await new Promise(r => setTimeout(r, 1500));
     }
   } catch(e) {
     console.error('[Poll] Error:', e.message);
-    if (e.response?.status === 401 || e.response?.status === 403) sesion.expira = 0;
+    if (e.response && (e.response.status === 401 || e.response.status === 403)) sesion.expira = 0;
   }
 }
 
@@ -380,40 +370,34 @@ async function procesarThread(threadId, phpsessid) {
         'https://www.igms.com/api/data/thread-page-data?params[thread_id]=' + threadId + '&params[platform_type]=airbnb&params[owner_user_id]=' + cid,
         { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
       );
-      data = res.data?.data;
-      scope = res.data?.scopeData || {};
-      if (data && data.platformThreadEventIds?.length) break;
+      data = res.data && res.data.data;
+      scope = (res.data && res.data.scopeData) || {};
+      if (data && data.platformThreadEventIds && data.platformThreadEventIds.length) break;
     }
     if (!data) return;
     const eventIds = data.platformThreadEventIds || [];
     const lastEventId = eventIds[eventIds.length - 1];
     if (!lastEventId || respondidos.has(lastEventId)) return;
-    const threadEvent = scope.PlatformThreadEvent?.data?.[lastEventId];
+    const threadEvent = scope.PlatformThreadEvent && scope.PlatformThreadEvent.data && scope.PlatformThreadEvent.data[lastEventId];
     if (!threadEvent) return;
-    // sent_by_host puede ser false, 0, null, undefined segun la version de IGMS
-    // Si no existe el campo, asumir que es del huesped (no del host)
+    // No responder si es del host
     const esHost = threadEvent.sent_by_host === true || threadEvent.sent_by_host === 1;
     const mensaje = threadEvent.message || threadEvent.body || '';
     if (esHost || !mensaje || mensaje.length < 2) return;
-    console.log('[Thread] Campos del evento:', JSON.stringify({
-      sent_by_host: threadEvent.sent_by_host,
-      is_incoming: threadEvent.is_incoming,
-      author_type: threadEvent.author_type,
-      role: threadEvent.role
-    }));
-    const reservas = scope.Reservation?.data || {};
+    const reservas = (scope.Reservation && scope.Reservation.data) || {};
     const resKey = Object.keys(reservas)[0];
     const reserva = reservas[resKey] || {};
     const propiedad = reserva.listing_name || data.listing_name || 'Propiedad SuperHost Loft';
     const nombre = reserva.guest_name || threadEvent.author_name || 'Huesped';
-    console.log('[Thread] Msg de ' + nombre + ' [' + propiedad.substring(0, 25) + ']: "' + mensaje.substring(0, 50) + '"');
+    console.log('[Poll] Mensaje de ' + nombre + ' [' + propiedad.substring(0, 25) + ']: "' + mensaje.substring(0, 60) + '"');
+    console.log('[Poll] Campos: sent_by_host=' + threadEvent.sent_by_host + ' is_incoming=' + threadEvent.is_incoming + ' author_type=' + threadEvent.author_type);
     respondidos.add(lastEventId);
     if (respondidos.size > 500) respondidos.delete(respondidos.values().next().value);
     const respuesta = await generarRespuesta(mensaje, nombre, propiedad);
     const enviado = await enviarMensaje(threadId, respuesta, phpsessid);
-    if (enviado) console.log('[Thread] Respondido a ' + nombre);
+    if (enviado) console.log('[Poll] Respondido a ' + nombre);
   } catch(e) {
-    console.error('[Thread] Error:', e.message);
+    console.error('[Poll] Error en thread:', e.message);
   }
 }
 
@@ -424,12 +408,6 @@ async function procesarMensajeSocket(data) {
   const mensaje = data.message || data.text || data.body || '';
   const threadId = data.thread_id || data.threadId;
   if (!mensaje || !threadId || esHost) return;
-  console.log('[Socket] Campos msg:', JSON.stringify({
-    sent_by_host: data.sent_by_host,
-    is_incoming: data.is_incoming,
-    event_type: data.event_type,
-    thread_id: threadId
-  }));
   respondidos.add(msgId);
   if (respondidos.size > 500) respondidos.delete(respondidos.values().next().value);
   const nombre = data.guest_name || data.author || 'Huesped';
@@ -444,15 +422,19 @@ async function procesarMensajeSocket(data) {
 }
 
 // ===========================================================
-// ARRANQUE
+// ARRANQUE — setInterval FUERA del bloque async
 // ===========================================================
-(async () => {
-  await loginIGMS();
-  await conectarSocket();
-  setInterval(polling, 30 * 1000);
-  setInterval(loginIGMS, 20 * 60 * 60 * 1000);
-  console.log('[SHL] Asistente v' + VERSION + ' iniciado - envio automatico ACTIVO');
-})();
+loginIGMS().then(() => {
+  conectarSocket();
+});
+
+// Polling cada 30 segundos — FUERA del bloque async para garantizar ejecucion
+setInterval(polling, 30 * 1000);
+
+// Renovar login cada 20 horas
+setInterval(loginIGMS, 20 * 60 * 60 * 1000);
+
+console.log('[SHL] Asistente v' + VERSION + ' - polling iniciado cada 30s');
 
 // Auto-ping para mantener activo en Render free tier
 setInterval(() => {
@@ -481,20 +463,22 @@ app.post('/test', async (req, res) => {
 });
 
 app.post('/poll/force', async (req, res) => {
+  console.log('[Poll] Forzado manualmente');
   polling().catch(console.error);
-  res.json({ ok: true, message: 'Polling forzado' });
+  res.json({ ok: true, message: 'Polling iniciado' });
 });
 
-app.get('/health', (req, res) => res.json({
-  status: 'Asistente activo',
-  version: VERSION,
-  socket: socketConectado ? 'conectado' : 'reconectando',
-  sesion: sesion.phpsessid ? 'activa' : 'sin sesion',
-  polling    : CONFIG.IGMS_EMAIL ? 'activo cada 30s' : 'sin credenciales IGMS',
-  timestamp: new Date().toISOString()
-}));
+app.get('/health', (req, res) => {
+  res.json({
+    status     : 'Asistente activo',
+    version    : VERSION,
+    socket     : socketConectado ? 'conectado' : 'reconectando',
+    sesion     : sesion.phpsessid ? 'activa' : 'sin sesion',
+    polling    : 'activo cada 30s',
+    timestamp  : new Date().toISOString()
+  });
+});
 
 app.listen(CONFIG.PORT, () => {
   console.log('[SHL] Asistente v' + VERSION + ' - Puerto ' + CONFIG.PORT);
-  console.log('[SHL] IGMS: ' + (CONFIG.IGMS_EMAIL ? CONFIG.IGMS_EMAIL : 'SIN EMAIL'));
 });
