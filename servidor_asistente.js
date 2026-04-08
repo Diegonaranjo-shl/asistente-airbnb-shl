@@ -248,12 +248,18 @@ async function polling() {
 
 async function procesarThread(threadId, phpsessid) {
   try {
-    const res = await axios.get(
-      `https://www.igms.com/api/data/thread-page-data?params[thread_id]=${threadId}&params[platform_type]=airbnb&params[owner_user_id]=${CONFIG.IGMS_CLIENT_ID}`,
-      { headers: { Cookie: `PHPSESSID=${phpsessid}`, 'User-Agent': 'Mozilla/5.0' } }
-    );
-    const data = res.data?.data;
-    const scope = res.data?.scopeData || {};
+    // Intentar con ambos client IDs (cuenta 8044 y cuenta 26271)
+    const CLIENT_IDS = [CONFIG.IGMS_CLIENT_ID, 26271];
+    let res, data, scope;
+    for (const cid of CLIENT_IDS) {
+      res = await axios.get(
+        `https://www.igms.com/api/data/thread-page-data?params[thread_id]=${threadId}&params[platform_type]=airbnb&params[owner_user_id]=${cid}`,
+        { headers: { Cookie: `PHPSESSID=${phpsessid}`, 'User-Agent': 'Mozilla/5.0' } }
+      );
+      data = res.data?.data;
+      scope = res.data?.scopeData || {};
+      if (data && data.platformThreadEventIds?.length) break;
+    }
     if (!data) return;
     const eventIds = data.platformThreadEventIds || [];
     const lastEventId = eventIds[eventIds.length - 1];
