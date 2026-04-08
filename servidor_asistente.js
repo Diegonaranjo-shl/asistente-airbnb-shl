@@ -98,6 +98,7 @@ RODADERO 401 (Santa Marta):
 - Tarjeta negra: acceso sin codigo. Perdida cuesta 20 USD
 - WiFi: Red Apartamento401 / Clave: Manzanares401
 - AC: conectar extractor de aire al usarlo (hay uno en sala y uno en habitacion)
+- Sistema A/C: sala + habitacion 1 comparten un equipo. Habitaciones 2 y 3 tienen otro equipo independiente
 - TV Smart: Netflix + app MAGIC (cable)
 - Multa: 100 USD por persona no registrada que ingrese
 - Late checkout: 50% de la tarifa diaria
