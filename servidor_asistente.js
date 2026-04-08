@@ -87,7 +87,7 @@ async function generarCodigoTTLock(lockId, nombre) {
 
 // IDs de cerraduras TTLock por apartamento (llenar con los lockIds reales)
 const TTLOCK_LOCK_IDS = {
-  PORTON: process.env.TTLOCK_LOCK_ID_PORTON || null, // lockId del porton principal BlackLiving
+  PORTON: parseInt(process.env.TTLOCK_LOCK_ID_PORTON || '6778458'), // BLACK LIVING - S31_191559
 };
 
 
@@ -424,6 +424,116 @@ async function procesarThread(threadId, phpsessid) {
   } catch(e) { console.error('Error thread:', e.message); }
 }
 
+
+// ============================================================
+// FUNCION: Generar mensaje de check-in con codigo TTLock
+// ============================================================
+const CODIGOS_CAJA = {
+  101:2850, 201:1607, 202:190, 301:3676, 302:9244, 303:2713,
+  304:9094, 305:5961, 306:6457, 401:8219, 402:3253, 403:9733,
+  404:9034, 405:1357, 406:1486, 501:2080
+};
+
+function extraerNumeroApto(propiedad) {
+  const m = propiedad.match(/\b(101|201|202|301|302|303|304|305|306|401|402|403|404|405|406|501)\b/);
+  return m ? parseInt(m[1]) : null;
+}
+
+function esEdificioBlackliving(propiedad) {
+  const p = propiedad.toLowerCase();
+  return p.includes('blackliving') || p.includes('black living') || 
+         p.includes('aeropuerto') || p.includes('embajada') || 
+         p.includes('encanto') || p.includes('engativa') ||
+         p.includes('73bis') || p.includes('73 bis') ||
+         extraerNumeroApto(propiedad) !== null;
+}
+
+async function generarMensajeCheckin(nombre, propiedad, phpsessid) {
+  try {
+    if (!esEdificioBlackliving(propiedad)) return null;
+    const numApto = extraerNumeroApto(propiedad);
+    if (!numApto) return null;
+    const codigoCaja = CODIGOS_CAJA[numApto];
+    if (!codigoCaja) return null;
+
+    // Generar codigo TTLock para hoy
+    let codigoTTLock = null;
+    if (TTLOCK_LOCK_IDS.PORTON) {
+      codigoTTLock = await generarCodigoTTLock(TTLOCK_LOCK_IDS.PORTON, nombre);
+    }
+    const codigoPorton = codigoTTLock ? `${codigoTTLock}` : '[CÓDIGO PORTÓN]';
+
+    return `Hola ${nombre} 👋
+El personal del edificio tendrá una autorización para permitir tu ingreso.
+
+🏢 EDIFICIO PORTÓN NEGRO
+Dirección: Cra 73bis #64A-67
+APTO ${numApto}
+📍 https://g.co/kgs/e2irUV
+
+La puerta del edificio es con cerradura de teclado:
+1. Frota la mano en la parte de arriba hasta que se prenda el teclado.
+2. Ingresa el CÓDIGO: ${codigoPorton}# — RECUERDA EL SIGNO # VA AL FINAL
+3. Baja la manija negra para abrir la puerta.
+4. Una vez adentro cierra y sube la manija negra para asegurar.
+
+Junto a la puerta del apto encontrarás la caja de llaves:
+Alinea el código, baja la palanca negra y hala la tapa.
+CÓDIGO DE CAJA DE LLAVES: ${codigoCaja}
+
+Encontrarás 3 llaves:
+- Llave puerta principal (doble llave después de las 10pm)
+- Llave de emergencia (debe permanecer en la cajita)
+- Tarjeta negra: acceso sin código al edificio
+
+⚠️ Pérdida de llaves: 10 USD
+
+¡Saludos!
+Equipo Super Host Loft 🏠`;
+  } catch(e) {
+    console.error('Error generarMensajeCheckin:', e.message);
+    return null;
+  }
+}
+
+// Reservas pendientes de check-in (para enviar codigo el dia de llegada)
+const reservasPendientes = {};
+
+async function programarCheckin(threadId, nombre, propiedad, fechaCheckin, phpsessid) {
+  const hoy = new Date().toDateString();
+  const llegada = new Date(fechaCheckin).toDateString();
+  if (hoy === llegada) {
+    // Es hoy — enviar ahora
+    const msg = await generarMensajeCheckin(nombre, propiedad, phpsessid);
+    if (msg) {
+      await enviarMensaje(threadId, msg, phpsessid);
+      console.log(`Check-in enviado a ${nombre} - ${propiedad}`);
+    }
+  } else {
+    // Guardar para enviar el dia correcto
+    reservasPendientes[threadId] = { nombre, propiedad, fechaCheckin };
+    console.log(`Check-in programado para ${nombre} - ${fechaCheckin}`);
+  }
+}
+
+// Revisar cada hora si hay check-ins programados para hoy
+setInterval(async () => {
+  const hoy = new Date().toDateString();
+  for (const [threadId, r] of Object.entries(reservasPendientes)) {
+    if (new Date(r.fechaCheckin).toDateString() === hoy) {
+      const phpsessid = await getSesion();
+      if (phpsessid) {
+        const msg = await generarMensajeCheckin(r.nombre, r.propiedad, phpsessid);
+        if (msg) {
+          await enviarMensaje(threadId, msg, phpsessid);
+          console.log(`[check-in automatico] ${r.nombre} - ${r.propiedad}`);
+          delete reservasPendientes[threadId];
+        }
+      }
+    }
+  }
+}, 60 * 60 * 1000); // cada hora
+
 async function procesarMensajeSocket(data) {
   const msgId = data.event_id || data.id || (data.thread_id + '_' + Date.now());
   if (respondidos.has(msgId)) return;
@@ -436,6 +546,16 @@ async function procesarMensajeSocket(data) {
   const propiedad = data.listing_name || 'Propiedad SHL';
   const phpsessid = await getSesion();
   if (!phpsessid) return;
+
+  // Si es confirmacion de reserva, programar mensaje de check-in con TTLock
+  const esConfirmacion = data.event_type === 'reservation_confirmed' || 
+    mensaje.toLowerCase().includes('reserva confirmada') ||
+    mensaje.toLowerCase().includes('reservation confirmed') ||
+    data.reservation_status === 'accepted';
+  if (esConfirmacion && data.checkin_date) {
+    await programarCheckin(threadId, nombre, propiedad, data.checkin_date, phpsessid);
+  }
+
   const respuesta = await generarRespuesta(mensaje, nombre, propiedad);
   await enviarMensaje(threadId, respuesta, phpsessid);
 }
