@@ -133,6 +133,17 @@ EARLY CHECK-IN NEGADO: cuando hay limpieza pendiente del apartamento se niega di
 DOCUMENTOS MENORES DE EDAD: si tienen 10 anos o mas pedir documento. Bebes y ninos pequenos no es necesario
 ACOMPAÃÂÃÂÃÂÃÂANTES NO REGISTRADOS BLACKLIVING: pedir foto del documento por chat de Airbnb, el ingreso sigue siendo autonomo con los codigos
 MALETAS ANTES CHECK-IN: se puede confirmar el dia anterior segun disponibilidad. Minimo desde las 11:30am. NO antes de las 10am porque no hay recepcion. Depende del huesped que sale
+CAMBIO DE APTO EN MISMO EDIFICIO: si el huesped necesita otro apto, ofrecer disponible en el mismo edificio y hacer modificacion desde Airbnb. El huesped puede mudarse tan pronto confirme la reserva.
+FUMAR EN EL APTO: totalmente prohibido dentro del edificio y el apto. Causal de multa. Si se encuentran evidencias notificar al huesped con la evidencia (foto).
+LINKS APTOS BLACKLIVING DISPONIBLES:
+- Apto 302: airbnb.com/h/aeropuerto302
+- Apto 303: airbnb.com/h/aeropuerto303
+- Apto 306: airbnb.com/h/aeropuerto306
+- Apto 401: airbnb.com/h/401aeropuerto
+- Apto 403: airbnb.com/h/loft-aeropuerto403
+- Apto 405: airbnb.com/h/405bl
+- Apto 406: airbnb.com/h/loft-aeropuerto406
+- Apto 202: airbnb.com/h/apto202aeropuerto
 DISTANCIAS DESDE BLACKLIVING (referencias utiles):
 - Salitre Magico: 30 min en bicicleta
 - Aeropuerto El Dorado: 15 min en carro
