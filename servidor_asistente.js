@@ -102,6 +102,12 @@ RODADERO 401 (Santa Marta):
 - Multa: 100 USD por persona no registrada que ingrese
 - Late checkout: 50% de la tarifa diaria
 - Comunicacion: SOLO por chat Airbnb, NO dar WhatsApp personal
+- Check-out: dejar llaves sobre el comedor
+- Late checkout: 50% tarifa diaria (ej: $193.000)
+MENSAJE BIENVENIDA ESTADÍA SM401 (enviar al confirmar llegada):
+"[NOMBRE] gracias por hospedarte con nosotros. Disfruta tu estadía, te dejo algunas indicaciones. POR FAVOR AYUDANOS A CUIDAR CADA OBJETO DEL APTO. DATOS DEL WIFI: Red: Apartamento401 Clave: Manzanares401. En el bano estan las toallas. La TV es smart con Netflix y app MAGIC. Las instrucciones de la lavadora estan pegadas en la pared. Al usar el aire acondicionado recuerda conectar el extractor de aire que se encuentra en la sala y la habitacion. Cualquier duda estamos para servirte."
+MENSAJE RECORDATORIO CHECKOUT SM401 (dia anterior a salida):
+"Hola [NOMBRE] Espero que lo hayas pasado muy bien. Para manana [FECHA] esta programada tu salida. Recuerda que el check out es maximo a las 11:00 am. Si tienes planeado salir antes o deseas extender tu estadia nos avisas. En Airbnb las resenas son muy importantes, si lo pasaste bien te agradezco una calificacion 5 estrellas. Gracias por hospedarte con nosotros!"
 SANTA MARINA 1410: Cj Santa Marina Torre 2 | caja:1621 | WiFi: SHLOFT1410 | tiene A/C
 - Descuento estadias largas: 30% (ya aplicado automaticamente en Airbnb antes del pago)
 - Si piden precio especial o negociar: decir que el precio en Airbnb ya tiene el descuento del 30% aplicado, ese es el precio final
