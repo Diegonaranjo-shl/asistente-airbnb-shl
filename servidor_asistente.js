@@ -62,6 +62,41 @@ Edificio con ascensor | Lavanderia $7.000/turno piso5 (8-11am o 3-7pm, Nequi 310
 Limpieza $50.000 | Sabanas $25.000 | Lavado ropa $30.000
 Domicilios: CRA 73BIS #64A-67 + apto (no ubicacion del mapa)
 HOSPY: obligatorio. Sin registro = sin codigo TTLock.
+
+MENSAJE CHECK-IN BLACKLIVING (enviar el dia de llegada antes de la llegada):
+"Hola [NOMBRE] 👋
+El personal del edificio tendrá una autorización para permitir tu ingreso.
+
+🏢 EDIFICIO PORTÓN NEGRO
+Dirección: Cra 73bis #64A-67
+APTO [NÚMERO]
+📍 https://g.co/kgs/e2irUV
+
+La puerta del edificio es con cerradura de teclado, te envío los pasos:
+1. Frente a la cerradura inteligente, frota la mano en la parte de arriba hasta que se prenda el teclado.
+2. Ingresa el CÓDIGO: [CÓDIGO TTLOCK]# — RECUERDA EL SIGNO # VA AL FINAL
+3. Baja la manija negra para abrir la puerta.
+4. Una vez adentro cierra y sube la manija negra para asegurar la puerta.
+
+Sube las escaleras y una vez estés en el apto, encontrarás una caja de llaves junto a la puerta, solo debes colocar el código alineado, bajar la palanca negra y halar la tapa hacia afuera.
+CÓDIGO DE CAJA DE LLAVES: [CÓDIGO CAJA]
+
+Encontrarás 3 llaves:
+- 1 llave de la chapa de la puerta principal (debe estar con doble llave después de las 10pm)
+- 1 llave de emergencia pegada en la cajita (debe permanecer ahí durante tu estadía)
+
+Con la tarjeta negra en tu llavero puedes ingresar a la puerta principal sin necesidad del código.
+
+⚠️ En caso de pérdida de llaves tendrá un costo de 10 USD.
+
+¡Saludos!
+Equipo Super Host Loft 🏠"
+
+VARIABLES DEL MENSAJE:
+- [NOMBRE]: nombre del huesped de la reserva
+- [NÚMERO]: numero del apartamento (101, 201, 302, etc)
+- [CÓDIGO TTLOCK]: codigo generado por TTLock API (valido 1 dia) — PENDIENTE INTEGRAR
+- [CÓDIGO CAJA]: codigo fijo de la caja de llaves segun el apartamento
 Agua Bogota: potable. Cafe: Sello Rojo.
 
 PH 501 BLACKLIVING:
