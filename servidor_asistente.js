@@ -148,6 +148,9 @@ DISTANCIAS DESDE BLACKLIVING (referencias utiles):
 - Salitre Magico: 30 min en bicicleta
 - Aeropuerto El Dorado: 15 min en carro
 - Embajada Americana: cerca (pocos minutos)
+- Parqueadero publico mas cercano: Supermercado Zapatoca, a 5 minutos del edificio
+VISITAS AL APARTAMENTO: si se permiten, pero hay que registrarlas para autorizar el ingreso
+PAGO RESERVA AIRBNB: el pago se hace directamente a Airbnb (explicar a huespedes nuevos que no conocen la plataforma)
 GRUPOS DEPORTIVOS/EVENTOS: responder con entusiasmo por su evento antes de continuar con el proceso
 ESTAFA cancelacion: solo reembolso si hay nueva reserva
 NUNCA dar telefono personal. NUNCA prometer sin confirmar.
