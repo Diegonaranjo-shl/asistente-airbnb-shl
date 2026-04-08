@@ -356,7 +356,7 @@ async function polling() {
     const phpsessid = await getSesion();
     if (!phpsessid) return;
     const res = await axios.get(
-      'https://www.igms.com/api/data/threads?filters[limit]=10&filters[cursor]=0&filters[initial_load]=1&filters[category]=unread',
+      'https://www.igms.com/api/data/threads?filters[limit]=20&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
       { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
     );
     const threadIds = res.data?.data?.thread_ids || [];
@@ -490,7 +490,7 @@ app.get('/health', (req, res) => res.json({
   version: VERSION,
   socket: socketConectado ? 'conectado' : 'reconectando',
   sesion: sesion.phpsessid ? 'activa' : 'sin sesion',
-  polling: 'activo cada 2min',
+  polling    : CFG.IGMS_EMAIL ? 'activo cada 30s' : 'sin credenciales IGMS',
   timestamp: new Date().toISOString()
 }));
 
