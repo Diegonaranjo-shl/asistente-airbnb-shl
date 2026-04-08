@@ -449,7 +449,7 @@ async function procesarMensajeSocket(data) {
 (async () => {
   await loginIGMS();
   await conectarSocket();
-  setInterval(polling, 2 * 60 * 1000);
+  setInterval(polling, 30 * 1000);
   setInterval(loginIGMS, 20 * 60 * 60 * 1000);
   console.log('[SHL] Asistente v' + VERSION + ' iniciado - envio automatico ACTIVO');
 })();
