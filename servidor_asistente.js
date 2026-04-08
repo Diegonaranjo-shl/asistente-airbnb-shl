@@ -20,9 +20,77 @@ const CONFIG = {
   IGMS_PASSWORD:    process.env.IGMS_PASSWORD,
   IGMS_CLIENT_ID:   parseInt(process.env.IGMS_CLIENT_ID || '93483'),
   PORT:             process.env.PORT || 3000,
+  // TTLock API
+  TTLOCK_CLIENT_ID:     process.env.TTLOCK_CLIENT_ID || 'ef6d462b1ccd42b7a332b0113de71f97',
+  TTLOCK_CLIENT_SECRET: process.env.TTLOCK_CLIENT_SECRET || 'effa57da6d6e5ea588190ab457585c6c',
+  TTLOCK_USERNAME:      process.env.TTLOCK_USERNAME || 'diego.anfitrion@gmail.com',
+  TTLOCK_PASSWORD:      process.env.TTLOCK_PASSWORD || 'Airbnb1280.',
 };
 
 let sesion = { phpsessid: null, expira: 0 };
+
+// ============================================================
+// TTLOCK API — Generacion de codigos de acceso temporales
+// ============================================================
+const crypto = require('crypto');
+let ttlockToken = { access_token: null, expira: 0 };
+
+async function getTTLockToken() {
+  if (ttlockToken.access_token && Date.now() < ttlockToken.expira) return ttlockToken.access_token;
+  const md5pass = crypto.createHash('md5').update(CONFIG.TTLOCK_PASSWORD).digest('hex');
+  const params = new URLSearchParams({
+    client_id: CONFIG.TTLOCK_CLIENT_ID,
+    client_secret: CONFIG.TTLOCK_CLIENT_SECRET,
+    username: CONFIG.TTLOCK_USERNAME,
+    password: md5pass
+  });
+  const res = await axios.post('https://euapi.ttlock.com/oauth2/token', params.toString(), {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  });
+  ttlockToken = { access_token: res.data.access_token, expira: Date.now() + (res.data.expires_in - 60) * 1000 };
+  console.log('TTLock token renovado OK');
+  return ttlockToken.access_token;
+}
+
+async function generarCodigoTTLock(lockId, nombre) {
+  try {
+    const accessToken = await getTTLockToken();
+    const ahora = Date.now();
+    const inicio = new Date();
+    inicio.setHours(0, 0, 0, 0);
+    const fin = new Date();
+    fin.setHours(23, 59, 59, 0);
+    const params = new URLSearchParams({
+      clientId: CONFIG.TTLOCK_CLIENT_ID,
+      accessToken,
+      lockId: lockId.toString(),
+      keyboardPwdType: 4, // tipo: periodo de tiempo
+      keyboardPwdName: nombre.substring(0, 20),
+      startDate: inicio.getTime().toString(),
+      endDate: fin.getTime().toString(),
+      date: ahora.toString()
+    });
+    const res = await axios.post('https://euapi.ttlock.com/v3/keyboardPwd/get', params.toString(), {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    });
+    if (res.data.keyboardPwd) {
+      console.log(`TTLock codigo generado para ${nombre}: ${res.data.keyboardPwd}`);
+      return res.data.keyboardPwd;
+    }
+    console.error('TTLock error:', JSON.stringify(res.data));
+    return null;
+  } catch(e) {
+    console.error('TTLock excepcion:', e.message);
+    return null;
+  }
+}
+
+// IDs de cerraduras TTLock por apartamento (llenar con los lockIds reales)
+const TTLOCK_LOCK_IDS = {
+  PORTON: process.env.TTLOCK_LOCK_ID_PORTON || null, // lockId del porton principal BlackLiving
+};
+
+
 let socket = null;
 let socketConectado = false;
 let reconectando = false;
