@@ -108,11 +108,26 @@ MENSAJE BIENVENIDA ESTADÍA SM401 (enviar al confirmar llegada):
 "[NOMBRE] gracias por hospedarte con nosotros. Disfruta tu estadía, te dejo algunas indicaciones. POR FAVOR AYUDANOS A CUIDAR CADA OBJETO DEL APTO. DATOS DEL WIFI: Red: Apartamento401 Clave: Manzanares401. En el bano estan las toallas. La TV es smart con Netflix y app MAGIC. Las instrucciones de la lavadora estan pegadas en la pared. Al usar el aire acondicionado recuerda conectar el extractor de aire que se encuentra en la sala y la habitacion. Cualquier duda estamos para servirte."
 MENSAJE RECORDATORIO CHECKOUT SM401 (dia anterior a salida):
 "Hola [NOMBRE] Espero que lo hayas pasado muy bien. Para manana [FECHA] esta programada tu salida. Recuerda que el check out es maximo a las 11:00 am. Si tienes planeado salir antes o deseas extender tu estadia nos avisas. En Airbnb las resenas son muy importantes, si lo pasaste bien te agradezco una calificacion 5 estrellas. Gracias por hospedarte con nosotros!"
-SANTA MARINA 1410: Cj Santa Marina Torre 2 | caja:1621 | WiFi: SHLOFT1410 | tiene A/C
-- Descuento estadias largas: 30% (ya aplicado automaticamente en Airbnb antes del pago)
-- Si piden precio especial o negociar: decir que el precio en Airbnb ya tiene el descuento del 30% aplicado, ese es el precio final
-Camas: 1 doble (hab principal) + 1 sofa cama king (sala)
-Piscina 9am-9pm (no martes) | Manillas $29.200
+SANTA MARINA 1410 (Torre 2, Apto 1410, Conj Santa Marina, sector Don Jaca):
+- Ubicacion: pedir al Uber/taxista "Santa Marina sector Don Jaca". A 5 min del aeropuerto
+- Camas: 1 doble (hab principal) + 1 sofa cama king (sala). Tendidos sofa cama: en mueble debajo del lavamanos
+- WiFi: SHLOFT1410 / contrasena: SHLOFT-1410
+- Tiene A/C (control remoto, cerrar puertas/ventanas, 22-24C, apagar al salir)
+- Acceso: caja de seguridad codigo 1621 -> tarjeta blanca -> colocar en cajita de luz para electricidad. Al salir: quitar tarjeta y guardar. NO sacar de la torre, NO acercar a celulares. Perdida: $30 USD
+- Manillas condominio: $29.200/persona, pagar en recepcion al llegar o por QR (solicitar por chat)
+- Piscina: 9am-9pm (martes en mantenimiento) | Playa: 6am-7:45pm todos los dias
+- Descuento estadias largas: 30% (ya aplicado en Airbnb, ese es el precio final)
+- Late checkout: 50% tarifa (ej $90.000)
+- Desayuno incluido: leche, cafe, azucar, aceite, jugo naranja, pan, queso, jamon, huevos
+- Toallas: de bano y playa para cada huesped
+- TV sala: NO se puede conectar HDMI (montado en mueble). TV habitacion: SI se puede
+- Domicilios: WhatsApp +57 324 2283641. Tarjeta en cajon mesita de noche junto a la ventana
+- Transporte aeropuerto: Giovany Gomez — 3004707945 — $30.000
+- NO hay supermercados cerca — recomendar hacer mercado antes de llegar o pedir domicilio
+- Air Fryer: usar protector de papel del cajon de cocina, limpiar despues de usar
+- Agua caliente: girar a la izquierda, esperar 1-2 min
+- Lavadora: instrucciones en cajita de luz. Tendedero se puede sacar al balcon
+- Recomendacion: llevar repelente (mosquitos en tardes en la playa)
 TAYRONA: KM 37 Troncal | 4pm/11am | Wilfer: +57 321 7652591 | WiFi: BEACH SUITES/SUITES1621
 PALOMINO: Parcelacion Ukua Casa C1 | piscina+playa privada
 CURITÌ GLAMPING CASTILLO (San Gil-Aratoca Km5):
