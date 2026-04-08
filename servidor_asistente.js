@@ -363,36 +363,37 @@ async function polling() {
 
 async function procesarThread(threadId, phpsessid) {
   try {
-    const CLIENT_IDS = [CONFIG.IGMS_CLIENT_ID, 26271];
-    let data, scope;
-    for (const cid of CLIENT_IDS) {
-      const res = await axios.get(
-        'https://www.igms.com/api/data/thread-page-data?params[thread_id]=' + threadId + '&params[platform_type]=airbnb&params[owner_user_id]=' + cid,
-        { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
-      );
-      data = res.data && res.data.data;
-      scope = (res.data && res.data.scopeData) || {};
-      if (data && data.platformThreadEventIds && data.platformThreadEventIds.length) break;
-    }
-    if (!data) return;
-    const eventIds = data.platformThreadEventIds || [];
-    const lastEventId = eventIds[eventIds.length - 1];
-    if (!lastEventId || respondidos.has(lastEventId)) return;
-    const threadEvent = scope.PlatformThreadEvent && scope.PlatformThreadEvent.data && scope.PlatformThreadEvent.data[lastEventId];
-    if (!threadEvent) return;
-    // No responder si es del host
-    const esHost = threadEvent.sent_by_host === true || threadEvent.sent_by_host === 1;
-    const mensaje = threadEvent.message || threadEvent.body || '';
+    const res = await axios.get(
+      'https://www.igms.com/api/data/thread-page-data?params[thread_id]=' + threadId + '&params[platform_type]=airbnb&params[owner_user_id]=' + CONFIG.IGMS_CLIENT_ID,
+      { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
+    );
+    const scope = (res.data && res.data.scopeData) || {};
+
+    // Los mensajes estan en scope.Message.data — ordenados por dttm
+    const mensajes = scope.Message && scope.Message.data ? Object.values(scope.Message.data) : [];
+    if (!mensajes.length) return;
+    mensajes.sort((a, b) => (a.dttm || '').localeCompare(b.dttm || ''));
+    const ultimo = mensajes[mensajes.length - 1];
+
+    // Detectar si es del huesped: sender_id != host_id
+    const msgId = ultimo.id;
+    if (!msgId || respondidos.has(msgId)) return;
+    const esHost = ultimo.sender_id === ultimo.host_id;
+    const mensaje = ultimo.message_text || '';
     if (esHost || !mensaje || mensaje.length < 2) return;
+
+    // Datos de la reserva
     const reservas = (scope.Reservation && scope.Reservation.data) || {};
     const resKey = Object.keys(reservas)[0];
     const reserva = reservas[resKey] || {};
+    const data = (res.data && res.data.data) || {};
     const propiedad = reserva.listing_name || data.listing_name || 'Propiedad SuperHost Loft';
-    const nombre = reserva.guest_name || threadEvent.author_name || 'Huesped';
-    console.log('[Poll] Mensaje de ' + nombre + ' [' + propiedad.substring(0, 25) + ']: "' + mensaje.substring(0, 60) + '"');
-    console.log('[Poll] Campos: sent_by_host=' + threadEvent.sent_by_host + ' is_incoming=' + threadEvent.is_incoming + ' author_type=' + threadEvent.author_type);
-    respondidos.add(lastEventId);
+    const nombre = reserva.guest_name || 'Huesped';
+
+    console.log('[Poll] Msg de ' + nombre + ' [' + propiedad.substring(0, 25) + ']: "' + mensaje.substring(0, 60) + '"');
+    respondidos.add(msgId);
     if (respondidos.size > 500) respondidos.delete(respondidos.values().next().value);
+
     const respuesta = await generarRespuesta(mensaje, nombre, propiedad);
     const enviado = await enviarMensaje(threadId, respuesta, phpsessid);
     if (enviado) console.log('[Poll] Respondido a ' + nombre);
