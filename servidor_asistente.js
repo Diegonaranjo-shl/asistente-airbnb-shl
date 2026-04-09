@@ -572,23 +572,29 @@ async function conectarSocket() {
     setTimeout(() => conectarSocket(), 60000);
   });
   
-  // Escuchar TODOS los eventos para descubrir cuáles usa IGMS
-  socket.onAny((eventName, data) => {
-    console.log('[Socket] Evento "' + eventName + '":', JSON.stringify(data).substring(0, 200));
-  });
+  // Escuchar eventos conocidos de IGMS + variantes comunes
+  const eventosIGMS = [
+    'new_message', 'message', 'thread_update', 'new_thread',
+    'reservation', 'notification', 'update', 'data', 'event',
+    'inbox', 'chat', 'msg', 'new_reservation', 'booking',
+  ];
+  for (const evt of eventosIGMS) {
+    socket.on(evt, async (data) => {
+      console.log('[Socket] Evento "' + evt + '":', JSON.stringify(data).substring(0, 200));
+      if (typeof data === 'object' && (data.thread_id || data.threadId || data.message || data.text)) {
+        await procesarMensajeSocket(data);
+      }
+    });
+  }
   
-  socket.on('new_message', async (data) => {
-    console.log('[Socket] Nuevo msg:', JSON.stringify(data).substring(0, 150));
-    await procesarMensajeSocket(data);
-  });
-  
-  // Algunos sistemas usan 'message' en vez de 'new_message'
-  socket.on('message', async (data) => {
-    if (typeof data === 'object' && (data.thread_id || data.message)) {
-      console.log('[Socket] Evento "message":', JSON.stringify(data).substring(0, 150));
-      await procesarMensajeSocket(data);
+  // Capturar eventos no listados via el emit original (compatible con v2)
+  const _origEmit = socket.emit.bind(socket);
+  socket.emit = function(event, ...args) {
+    if (!eventosIGMS.includes(event) && !['connect','disconnect','connect_error','reconnect'].includes(event)) {
+      console.log('[Socket] Evento NO listado "' + event + '":', JSON.stringify(args[0]).substring(0, 150));
     }
-  });
+    return _origEmit(event, ...args);
+  };
 }
 
 // ===========================================================
