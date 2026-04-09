@@ -21,7 +21,7 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 
-const VERSION = '5.7.2';
+const VERSION = '5.8.0';
 
 const CONFIG = {
   ANTHROPIC_API_KEY:    process.env.ANTHROPIC_API_KEY,
