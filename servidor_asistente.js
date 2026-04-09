@@ -126,7 +126,17 @@ Codigos caja: 101->2850|201->1607|202->0190|301->3676|302->9244|303->2713|304->9
 306->6457|401->8219|402->3253|403->9733|404->9034|405->1357|406->1486|501->2080
 Parqueadero BLACKLIVING: GRATIS para estadias cortas. Solo para MOTO (no hay para carro).
 Estadias mas de 30 dias en BLACKLIVING: $35.000 COP MENSUAL.
-NOTA: esta politica de parqueadero aplica SOLAMENTE para el edificio BlackLiving.
+NOTA: esta politica de parqueadero moto aplica SOLAMENTE para el edificio BlackLiving.
+
+RESUMEN PARQUEADERO TODAS LAS PROPIEDADES:
+- BLACKLIVING (aptos 101-501): SOLO MOTO, gratis cortas, $35.000/mes largas. NO HAY para carro.
+- SANTA MARTA 1410: AUTO y MOTO gratis.
+- BEACH SUITES TAYRONA (Suite Blue, Green, Beach 2): AUTO y MOTO gratis.
+- SANTA BARBARA 205: AUTO y MOTO gratis.
+- MUSEO 1309: AUTO y MOTO gratis.
+- LA 33-805: AUTO y MOTO gratis.
+- COUNTRY 310: consultar.
+- CANDELARIA 1210: consultar.
 Edificio con ascensor | Lavanderia $7.000/turno piso5 (8-11am o 3-7pm, Nequi 3107541755 Maritza Mora)
 Domicilios: CRA 73BIS 64A-67 + num apto (no ubicacion del mapa)
 Agua Bogota: potable. Cafe: Sello Rojo.
@@ -134,7 +144,7 @@ WIFI BLACKLIVING: si cae red principal, alternativas: HOST-101, APTO30422, APTO4
 HOSPY: obligatorio. Sin registro = sin codigo TTLock.
 PLAZO REGISTRO HOSPY: la informacion de huespedes debe estar lista 1 semana antes de la llegada. Si preguntan hasta cuando tienen tiempo, responder: "La informacion debe estar lista 1 semana antes de su llegada."
 APTO 101: primer piso, 4 habitaciones
-APTO 201: 2do piso. TV en una habitacion y en la sala. No hay parqueadero para carro, unicamente moto.
+APTO 201: 2do piso. TV en una habitacion y en la sala.
 APTO 202: 2do piso. 2 habitaciones, 2 banos.
 PH 501: 5to piso. Terraza privada | hab principal cama queen + bano privado con jacuzzi | hasta 8 personas.
 PH 501 WIFI: PENTHOUSE_INV (clave: WIFI501@) o PENTHOUSE_PLUS (clave: Wifi501@).
@@ -142,22 +152,27 @@ PH 501 JACUZZI: instrucciones en video https://youtube.com/shorts/-biKIMfWL8s
 PH 501 EXTRAS: estufa de gas (oprimir boton encendido), lamparas se prenden tocando la base, sofa cama para 2 (cobijas en baul del mueble), Smart TV con Netflix (cuenta del huesped).
 PERDIDA DE LLAVES BLACKLIVING: costo 20 USD.
 
-LA 33-805: Cra 7 33-91 Edif Teleskop (estadias largas)
+LA 33-805: Cra 7 33-91 Edif Teleskop (estadias largas). Parqueadero auto y moto GRATIS.
 CANDELARIA 1210: Calle 18 3-18 Edif Ventto | caja: 9539
-SANTA BARBARA 205: Calle 124 21-10 Edif Toledo. Parqueadero disponible GRATIS.
+Museo2-1309: Centro Internacional de Bogota. Parqueadero auto y moto GRATIS.
+SANTA BARBARA 205: Calle 124 21-10 Edif Toledo. Parqueadero auto y moto GRATIS.
 COUNTRY 310: Edif LECCO, Calle 134c 12b-91, Apto 310. Consultar parqueadero.
 RODADERO 401 (Santa Marta): Calle 17 2-63, Edif Manzanares. Check-in hasta 10pm presencial. Encargada: Yurani.
+Taxi desde aeropuerto Santa Marta hasta apto 401: $30.000 COP.
 SANTA MARINA 1410: Torre 2, Apto 1410, Conj Santa Marina, sector Don Jaca. Manillas: $29.200/persona.
-Mantenimiento de piscinas: los dias MARTES.
+Taxi desde aeropuerto Santa Marta hasta apto 1410: $30.000 COP.
+Mantenimiento de piscinas: los dias MARTES. Parqueadero auto y moto GRATIS.
 Desayuno incluido SOLO para reservas de 7 noches o mas (leche, cafe, azucar, aceite, jugo naranja, pan, queso, jamon, huevos).
 Para reservas menores a 7 noches NO incluye desayuno.
 TAYRONA: KM 37 Troncal | 4pm/11am | Wilfer: +57 321 7652591
 Google Maps: Beach Suites Tayrona (asi se busca para llegar).
 Ubicacion en la playa, ideal para descansar y desconectarse.
+Distancia a entrada principal del Parque Tayrona: 7 minutos en auto.
 PLAYA: es de surf, se recomienda nadar SOLO a personas con experiencia en mar de surf.
 A 10 min caminando hay rio Mendihuaca de agua dulce, ideal para nadar.
-PARQUEADERO TAYRONA: si hay disponibilidad de parqueadero.
+PARQUEADERO TAYRONA: si, parqueadero auto y moto GRATIS.
 COMO LLEGAR TAYRONA: Desde Aeropuerto Santa Marta (SMR) ~1 hora en carro (50km).
+Transporte desde aeropuerto hasta Beach Suites: $190.000 COP, demora aprox 1 hora.
 Transporte publico: taxi hasta mercado/terminal Santa Marta, luego bus hacia Palomino o Guachaca, bajarse en "Casa Grande Surf".
 Indicacion final: Casa Grande Surf esta frente al mar sobre via principal, se ve una tabla de surf grande de madera.
 CONTACTO TAYRONA: Wilfer espera a los huespedes para entregar llaves. WhatsApp: +57 321 7632951.
@@ -166,6 +181,8 @@ SUITE BLUE JACUZZI: el agua tarda en calentarse 1 grado por hora. Ducharse antes
 GUIA BIENVENIDA SUITES: https://heyzine.com/flip-book/390141a0ce.html#page/3
 Al ingreso del huesped enviar instrucciones de uso de la suite.
 PALOMINO: Parcelacion Ukua Casa C1 | piscina+playa privada
+
+ALQUILER DE AUTO: Para huespedes de Santa Marta (1410, 401), Beach Suites Tayrona y Palomino, SIEMPRE preguntar si desean servicio de alquiler de auto. Ejemplo: "Tambien te ofrecemos servicio de alquiler de auto si lo necesitas durante tu estadia."
 CURITÌ CASTILLO: 7 cabanas, banos compartidos, sin desayuno, sin nevera en cabanas.
 
 PRECIOS: nunca dar precio total, decir que lo vean en la app Airbnb.
@@ -191,7 +208,10 @@ PREGUNTA SOBRE PISO DEL APTO: Responder directo. Ej: "Es en el 2do piso" (apto 2
 
 PREGUNTA SOBRE TV: Informar exactamente donde hay TV segun el apto.
 
-PREGUNTA PARQUEADERO CARRO BLACKLIVING: "No tenemos parqueadero para carro en el edificio, unicamente para moto."
+PREGUNTA PARQUEADERO:
+- BLACKLIVING (aptos 101-501): "Tenemos parqueadero unicamente para moto, no para carro."
+- SANTA MARTA 1410, BEACH SUITES TAYRONA, SANTA BARBARA 205, MUSEO, LA 33-805: "Si, tenemos parqueadero disponible para auto y moto, es gratis."
+- Otras propiedades: consultar antes de responder.
 
 PREGUNTA COMO LLEGAR TAYRONA: Compartir link Google Maps (Beach Suites Tayrona) e indicaciones desde aeropuerto. Mencionar que Wilfer los espera para entregar llaves.
 
@@ -756,31 +776,43 @@ async function polling() {
     const ok = await asegurarSesion();
     if (!ok) { console.log('[Poll] Sin sesion IGMS'); return; }
     
-    const res = await axios.get(getThreadsUrl(), {
-      headers: getApiHeaders(),
-      responseType: 'text',
-      maxRedirects: 0,
-      validateStatus: () => true,
-    });
+    // Consultar MULTIPLES categorías para no perder inquiries ni mensajes no leídos
+    const categorias = ['all', 'inquiry', 'unread'];
+    const todosThreadIds = new Set();
     
-    let data = res.data;
-    if (typeof data === 'string') {
-      if (data.trim().startsWith('<')) {
-        console.error('[Poll] IGMS devolvió HTML — marcando threads como no accesibles');
-        sesion.threadsOk = false;
-        return;
-      }
-      try { data = JSON.parse(data); } catch(e) {
-        console.error('[Poll] Respuesta no es JSON:', data.substring(0, 100));
-        return;
+    for (const cat of categorias) {
+      try {
+        const url = 'https://www.igms.com/api/data/threads?filters[limit]=50&filters[cursor]=0&filters[initial_load]=1&filters[category]=' + cat +
+          (sesion._strategy === 'C-hash-param' && sesion.hash ? '&hash=' + sesion.hash : '');
+        const res = await axios.get(url, {
+          headers: getApiHeaders(),
+          responseType: 'text',
+          maxRedirects: 0,
+          validateStatus: () => true,
+        });
+        
+        let data = res.data;
+        if (typeof data === 'string') {
+          if (data.trim().startsWith('<')) {
+            console.error('[Poll] IGMS devolvió HTML para cat=' + cat + ' — marcando threads como no accesibles');
+            sesion.threadsOk = false;
+            return;
+          }
+          try { data = JSON.parse(data); } catch(e) { continue; }
+        }
+        
+        const ids = extraerThreadIds(data);
+        ids.forEach(id => todosThreadIds.add(id));
+      } catch(e) {
+        console.log('[Poll] Error cat=' + cat + ': ' + e.message);
       }
     }
     
-    const threadIds = extraerThreadIds(data);
-    console.log('[Poll] ' + (threadIds.length > 0 ? threadIds.length + ' threads' : 'sin threads'));
-    for (const threadId of threadIds.slice(0, 20)) {
+    const threadIds = Array.from(todosThreadIds);
+    console.log('[Poll] ' + threadIds.length + ' threads (all+inquiry+unread)');
+    for (const threadId of threadIds.slice(0, 30)) {
       await procesarThread(threadId);
-      await new Promise(r => setTimeout(r, 1500));
+      await new Promise(r => setTimeout(r, 1000));
     }
   } catch(e) {
     console.error('[Poll] Error:', e.message);
