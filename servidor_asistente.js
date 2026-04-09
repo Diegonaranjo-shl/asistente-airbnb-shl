@@ -21,13 +21,14 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 
-const VERSION = '5.7.1';
+const VERSION = '5.7.2';
 
 const CONFIG = {
   ANTHROPIC_API_KEY:    process.env.ANTHROPIC_API_KEY,
   IGMS_EMAIL:           process.env.IGMS_EMAIL,
   IGMS_PASSWORD:        process.env.IGMS_PASSWORD,
   IGMS_CLIENT_ID:       parseInt(process.env.IGMS_CLIENT_ID || '93483'),
+  IGMS_BROWSER_COOKIES: process.env.IGMS_BROWSER_COOKIES || '',  // Cookies del navegador como fallback permanente
   PORT:                 process.env.PORT || 3000,
   TTLOCK_CLIENT_ID:     process.env.TTLOCK_CLIENT_ID || 'ef6d462b1ccd42b7a332b0113de71f97',
   TTLOCK_CLIENT_SECRET: process.env.TTLOCK_CLIENT_SECRET || 'effa57da6d6e5ea588190ab457585c6c',
@@ -531,8 +532,29 @@ async function loginIGMS() {
     if (sesion.threadsOk) {
       console.log('[IGMS] ✅ Threads accesibles con estrategia: ' + sesion._strategy);
     } else {
-      console.log('[IGMS] ⚠️ Threads NO accesibles — WebSocket será el canal principal');
-      console.log('[IGMS] Cookies enviadas: ' + sesion.cookies.substring(0, 200));
+      // ---- FALLBACK: usar cookies de variable de entorno ----
+      if (CONFIG.IGMS_BROWSER_COOKIES) {
+        console.log('[IGMS] Intentando con IGMS_BROWSER_COOKIES del ENV...');
+        sesion.cookies = CONFIG.IGMS_BROWSER_COOKIES;
+        const stratEnv = await testThreadsAccess('ENV-cookies', {
+          'Cookie': CONFIG.IGMS_BROWSER_COOKIES,
+          'User-Agent': UA,
+          'Accept': 'application/json, text/plain, */*',
+          'Referer': 'https://www.igms.com/app/chat.html',
+          'X-Requested-With': 'XMLHttpRequest',
+        });
+        if (stratEnv) {
+          sesion.threadsOk = true;
+          sesion._strategy = 'ENV-cookies';
+          console.log('[IGMS] ✅ Threads accesibles con cookies del ENV');
+        } else {
+          console.log('[IGMS] ⚠️ Cookies del ENV tampoco funcionan — necesitan renovarse');
+        }
+      }
+      
+      if (!sesion.threadsOk) {
+        console.log('[IGMS] ⚠️ Threads NO accesibles — WebSocket será el canal principal');
+      }
     }
     
     return true;
@@ -838,8 +860,13 @@ async function procesarThread(threadId) {
 
     const msgId = ultimo.id;
     if (!msgId || respondidos.has(msgId)) return;
-    const esHost = ultimo.sender_id === ultimo.host_id;
-    const mensaje = ultimo.message_text || '';
+    
+    // Detectar si es del huesped: sender_id != host_id
+    // En algunos inquiries host_id puede estar vacio, asi que tambien verificamos sender_type
+    const esHost = (ultimo.sender_id && ultimo.host_id && ultimo.sender_id === ultimo.host_id) ||
+                   (ultimo.sender_type === 'host') ||
+                   (ultimo.sent_by_host === true || ultimo.sent_by_host === 1);
+    const mensaje = ultimo.message_text || ultimo.message || ultimo.text || '';
     if (esHost || !mensaje || mensaje.length < 2) return;
 
     const reservas = (scope.Reservation && scope.Reservation.data) || {};
@@ -847,17 +874,23 @@ async function procesarThread(threadId) {
     const reserva = reservas[resKey] || {};
     const data = (res.data && res.data.data) || {};
     const propiedad = reserva.listing_name || data.listing_name || 'Propiedad SuperHost Loft';
-    const nombre = reserva.guest_name || 'Huesped';
+    const nombre = reserva.guest_name || data.guest_name || 'Huesped';
 
-    console.log('[Poll] Msg de ' + nombre + ' [' + propiedad.substring(0, 25) + ']: "' + mensaje.substring(0, 60) + '"');
+    console.log('[Poll] Msg de ' + nombre + ' [' + propiedad.substring(0, 30) + ']: "' + mensaje.substring(0, 60) + '"');
     respondidos.add(msgId);
-    if (respondidos.size > 500) respondidos.delete(respondidos.values().next().value);
+    if (respondidos.size > 1000) {
+      // Limpiar los mas viejos
+      const iter = respondidos.values();
+      for (let i = 0; i < 200; i++) iter.next();
+      respondidos.delete(respondidos.values().next().value);
+    }
 
     const respuesta = await generarRespuesta(mensaje, nombre, propiedad);
     const enviado = await enviarMensaje(threadId, respuesta);
     if (enviado) console.log('[Poll] Respondido a ' + nombre);
+    else console.log('[Poll] FALLO envio a ' + nombre);
   } catch(e) {
-    console.error('[Poll] Error en thread:', e.message);
+    console.error('[Poll] Error en thread ' + threadId + ':', e.message);
   }
 }
 
@@ -1205,6 +1238,9 @@ app.post('/igms/inject-cookies', async (req, res) => {
     sesion.expira = Date.now() + 22 * 60 * 60 * 1000;
     sesion._strategy = 'INYECTADA';
     
+    // También guardar como backup para sobrevivir re-logins
+    sesion._backupCookies = cookies;
+    
     // Probar acceso con las cookies inyectadas
     const testResult = await testAndDescribe(
       'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
@@ -1225,7 +1261,7 @@ app.post('/igms/inject-cookies', async (req, res) => {
       test_threads: testResult,
       threads_ok: sesion.threadsOk,
       mensaje: sesion.threadsOk
-        ? '✅ Cookies funcionan! El polling usará estas cookies.'
+        ? '✅ Cookies funcionan! El polling usará estas cookies. Para hacerlas permanentes, ve a Render → Environment y crea/actualiza la variable IGMS_BROWSER_COOKIES con este valor: ' + cookies
         : '❌ Cookies no autorizan threads. Verifica que copiaste TODAS las cookies del navegador.',
     });
   } catch(e) {
