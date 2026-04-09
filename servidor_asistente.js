@@ -21,7 +21,7 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 
-const VERSION = '5.7';
+const VERSION = '5.7.1';
 
 const CONFIG = {
   ANTHROPIC_API_KEY:    process.env.ANTHROPIC_API_KEY,
@@ -240,39 +240,85 @@ setInterval(async () => {
 }, 60 * 60 * 1000);
 
 // ===========================================================
-// LOGIN IGMS — MULTI-PASO (v5.7)
-// Paso 1: POST login → obtener wsb-user-uid + hash + redirect_url
-// Paso 2: GET redirect_url (chat.html) → capturar cookies adicionales
-// Paso 3: Probar /api/data/threads con todas las cookies
-// Paso 4: Si falla, probar con hash como X-Auth-Hash header
+// LOGIN IGMS — MULTI-PASO v5.7.1
+// DESCUBRIMIENTO: El navegador obtiene PHPSESSID + csrf_token
+// al navegar a chat.html DESPUÉS del login. El POST login solo
+// devuelve wsb-user-uid. Necesitamos seguir TODOS los redirects
+// manualmente acumulando cookies, como lo hace un navegador real.
 // ===========================================================
+
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+// Helper: hacer request acumulando cookies en el jar
+async function igmsRequest(method, url, cookieJar, opts) {
+  const config = {
+    method,
+    url,
+    headers: {
+      'Cookie': formatCookies(cookieJar),
+      'User-Agent': UA,
+      ...((opts && opts.headers) || {}),
+    },
+    maxRedirects: 0, // Manejar redirects manualmente
+    validateStatus: () => true,
+  };
+  if (opts && opts.data) config.data = opts.data;
+  if (opts && opts.responseType) config.responseType = opts.responseType;
+  
+  const res = await axios(config);
+  
+  // Acumular cookies de esta respuesta
+  const newCookies = res.headers['set-cookie'] || [];
+  for (const c of newCookies) {
+    const [nameVal] = c.split(';');
+    const eqIdx = nameVal.indexOf('=');
+    if (eqIdx > 0) {
+      cookieJar[nameVal.substring(0, eqIdx).trim()] = nameVal.substring(eqIdx + 1).trim();
+    }
+  }
+  
+  // Si es redirect, seguirlo con las cookies acumuladas
+  if (res.status >= 300 && res.status < 400 && res.headers.location) {
+    const loc = res.headers.location;
+    const nextUrl = loc.startsWith('http') ? loc : 'https://www.igms.com' + (loc.startsWith('/') ? '' : '/') + loc;
+    console.log('[IGMS] Redirect ' + res.status + ' → ' + nextUrl + ' (cookies: ' + Object.keys(cookieJar).join(',') + ')');
+    return igmsRequest('GET', nextUrl, cookieJar, { headers: { 'Accept': 'text/html,*/*', 'Referer': url } });
+  }
+  
+  return res;
+}
+
 async function loginIGMS() {
   try {
-    console.log('[IGMS] === Login multi-paso v5.7 ===');
+    console.log('[IGMS] === Login multi-paso v5.7.1 ===');
     
-    // ---- PASO 1: Login POST ----
-    const loginRes = await axios.post(
-      'https://www.igms.com/api/user-api/login',
-      { email: CONFIG.IGMS_EMAIL, password: CONFIG.IGMS_PASSWORD, platform: 'web' },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json, text/plain, */*',
-          'Origin': 'https://www.igms.com',
-          'Referer': 'https://www.igms.com/app/login.html',
-        },
-        maxRedirects: 0,
-        validateStatus: s => s < 400,
-      }
-    );
+    let cookieJar = {};
     
-    // Extraer datos del login
+    // ---- PASO 0: Visitar login.html para obtener cookies iniciales (como un navegador) ----
+    console.log('[IGMS] Paso 0 - Visitando login.html...');
+    await igmsRequest('GET', 'https://www.igms.com/app/login.html', cookieJar, {
+      headers: { 'Accept': 'text/html,*/*' }
+    });
+    console.log('[IGMS] Paso 0 - Cookies: ' + Object.keys(cookieJar).join(', '));
+    
+    // ---- PASO 1: POST login ----
+    console.log('[IGMS] Paso 1 - Login POST...');
+    const loginRes = await igmsRequest('POST', 'https://www.igms.com/api/user-api/login', cookieJar, {
+      data: { email: CONFIG.IGMS_EMAIL, password: CONFIG.IGMS_PASSWORD, platform: 'web' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/plain, */*',
+        'Origin': 'https://www.igms.com',
+        'Referer': 'https://www.igms.com/app/login.html',
+      },
+    });
+    
     const loginData = loginRes.data?.data?.data || loginRes.data?.data || loginRes.data || {};
     const loginErr = loginRes.data?.data?.err;
     const loginMsg = loginData.message;
     
     console.log('[IGMS] Paso 1 - Login: err=' + loginErr + ', msg=' + loginMsg);
+    console.log('[IGMS] Paso 1 - Cookies: ' + Object.keys(cookieJar).join(', '));
     
     if (loginErr !== false && loginMsg !== 'ok') {
       console.error('[IGMS] Login RECHAZADO:', JSON.stringify(loginData).substring(0, 200));
@@ -280,130 +326,89 @@ async function loginIGMS() {
       return false;
     }
     
-    // Guardar datos importantes del login
     sesion.hash = loginData.hash || null;
     sesion.userUid = loginData.user_uid || null;
     sesion.redirectUrl = loginData.redirect_url || null;
     
-    console.log('[IGMS] hash=' + (sesion.hash || 'null'));
-    console.log('[IGMS] user_uid=' + (sesion.userUid || 'null'));
-    console.log('[IGMS] redirect_url=' + (sesion.redirectUrl || 'null'));
+    console.log('[IGMS] hash=' + (sesion.hash || 'null') + ', redirect_url=' + (sesion.redirectUrl || 'null'));
     
-    // Capturar cookies del login
-    const loginCookies = loginRes.headers['set-cookie'] || [];
-    let cookieJar = {};
-    for (const c of loginCookies) {
-      const [nameVal] = c.split(';');
-      const eqIdx = nameVal.indexOf('=');
-      if (eqIdx > 0) {
-        cookieJar[nameVal.substring(0, eqIdx).trim()] = nameVal.substring(eqIdx + 1).trim();
+    // ---- PASO 2: Navegar a chat.html (redirect_url) — AQUÍ se genera PHPSESSID ----
+    if (sesion.redirectUrl) {
+      console.log('[IGMS] Paso 2 - Navegando a chat.html...');
+      const chatRes = await igmsRequest('GET', 'https://www.igms.com/app/' + sesion.redirectUrl, cookieJar, {
+        headers: {
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Referer': 'https://www.igms.com/app/login.html',
+        },
+      });
+      console.log('[IGMS] Paso 2 - Status: ' + chatRes.status + ', Cookies: ' + Object.keys(cookieJar).join(', '));
+      
+      // Buscar csrf_token en el HTML si no vino como cookie
+      if (!cookieJar.csrf_token) {
+        const html = (chatRes.data || '') + '';
+        const csrfMatch = html.match(/csrf[_-]token['":\s]*['"]([^'"]+)['"]/i);
+        if (csrfMatch) {
+          cookieJar.csrf_token = csrfMatch[1];
+          console.log('[IGMS] CSRF token extraído del HTML');
+        }
       }
     }
-    console.log('[IGMS] Cookies paso 1:', Object.keys(cookieJar).join(', '));
     
-    // ---- PASO 2: Seguir redirect_url para obtener cookies adicionales ----
-    if (sesion.redirectUrl) {
-      try {
-        const chatUrl = 'https://www.igms.com/app/' + sesion.redirectUrl;
-        console.log('[IGMS] Paso 2 - Navegando a: ' + chatUrl);
-        
-        const chatRes = await axios.get(chatUrl, {
-          headers: {
-            'Cookie': formatCookies(cookieJar),
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Referer': 'https://www.igms.com/app/login.html',
-          },
-          maxRedirects: 5,
-          validateStatus: () => true,
-        });
-        
-        // Capturar cookies adicionales del redirect
-        const chatCookies = chatRes.headers['set-cookie'] || [];
-        for (const c of chatCookies) {
-          const [nameVal] = c.split(';');
-          const eqIdx = nameVal.indexOf('=');
-          if (eqIdx > 0) {
-            cookieJar[nameVal.substring(0, eqIdx).trim()] = nameVal.substring(eqIdx + 1).trim();
-          }
-        }
-        console.log('[IGMS] Paso 2 - Status: ' + chatRes.status + ', cookies nuevas: ' + chatCookies.length);
-        console.log('[IGMS] Cookies acumuladas: ' + Object.keys(cookieJar).join(', '));
-        
-        // Buscar si hay un token CSRF o meta tag en el HTML
-        const html = (chatRes.data || '') + '';
-        const csrfMatch = html.match(/csrf[_-]token['":\s]+['"]([^'"]+)['"]/i);
-        const metaToken = html.match(/<meta\s+name=["'](?:csrf|_token|auth)['"]\s+content=["']([^'"]+)["']/i);
-        if (csrfMatch) console.log('[IGMS] CSRF token encontrado: ' + csrfMatch[1].substring(0, 20) + '...');
-        if (metaToken) console.log('[IGMS] Meta token encontrado: ' + metaToken[1].substring(0, 20) + '...');
-        
-      } catch(e) {
-        console.log('[IGMS] Paso 2 - Error (no critico): ' + e.message);
-      }
+    // ---- PASO 2b: Si aún no hay PHPSESSID, intentar navegar al index ----
+    if (!cookieJar.PHPSESSID) {
+      console.log('[IGMS] Paso 2b - No hay PHPSESSID aún, intentando /app/...');
+      await igmsRequest('GET', 'https://www.igms.com/app/', cookieJar, {
+        headers: { 'Accept': 'text/html,*/*', 'Referer': 'https://www.igms.com/app/login.html' },
+      });
+      console.log('[IGMS] Paso 2b - Cookies: ' + Object.keys(cookieJar).join(', '));
+    }
+    
+    // ---- PASO 2c: Si aún no hay PHPSESSID, intentar / ----
+    if (!cookieJar.PHPSESSID) {
+      console.log('[IGMS] Paso 2c - Intentando / raíz...');
+      await igmsRequest('GET', 'https://www.igms.com/', cookieJar, {
+        headers: { 'Accept': 'text/html,*/*' },
+      });
+      console.log('[IGMS] Paso 2c - Cookies: ' + Object.keys(cookieJar).join(', '));
     }
     
     // ---- PASO 3: Construir cookie string final ----
+    const hasPHP = !!cookieJar.PHPSESSID;
+    const hasCSRF = !!cookieJar.csrf_token;
+    console.log('[IGMS] Cookies finales: PHPSESSID=' + (hasPHP ? 'SI' : 'NO') + ', csrf_token=' + (hasCSRF ? 'SI' : 'NO') + ', total=' + Object.keys(cookieJar).length);
+    
     sesion.cookies = formatCookies(cookieJar);
     sesion.expira = Date.now() + 22 * 60 * 60 * 1000;
     sesion.loginOk = true;
-    console.log('[IGMS] Cookie final: ' + sesion.cookies.substring(0, 150));
     
-    // ---- PASO 4: Probar acceso a /api/data/threads con múltiples estrategias ----
+    // ---- PASO 4: Probar acceso a threads ----
     sesion.threadsOk = false;
     
-    // Estrategia A: Solo cookies
-    const stratA = await testThreadsAccess('A-cookies', {
+    const testHeaders = {
       'Cookie': sesion.cookies,
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'User-Agent': UA,
       'Accept': 'application/json, text/plain, */*',
       'Referer': 'https://www.igms.com/app/' + (sesion.redirectUrl || 'chat.html'),
       'X-Requested-With': 'XMLHttpRequest',
-    });
-    if (stratA) { sesion.threadsOk = true; sesion._strategy = 'A-cookies'; }
+    };
     
-    // Estrategia B: Cookies + hash como header
+    const stratA = await testThreadsAccess('A-all-cookies', testHeaders);
+    if (stratA) { sesion.threadsOk = true; sesion._strategy = 'A-all-cookies'; }
+    
+    // Si falla, probar con hash como header adicional
     if (!sesion.threadsOk && sesion.hash) {
-      const stratB = await testThreadsAccess('B-hash-header', {
-        'Cookie': sesion.cookies,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Referer': 'https://www.igms.com/app/' + (sesion.redirectUrl || 'chat.html'),
-        'X-Requested-With': 'XMLHttpRequest',
+      const stratB = await testThreadsAccess('B-hash', {
+        ...testHeaders,
         'X-Auth-Hash': sesion.hash,
-        'Authorization': 'Bearer ' + sesion.hash,
       });
-      if (stratB) { sesion.threadsOk = true; sesion._strategy = 'B-hash-header'; }
-    }
-    
-    // Estrategia C: Cookies + hash como query param
-    if (!sesion.threadsOk && sesion.hash) {
-      const stratC = await testThreadsAccess('C-hash-param', {
-        'Cookie': sesion.cookies,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Referer': 'https://www.igms.com/app/' + (sesion.redirectUrl || 'chat.html'),
-        'X-Requested-With': 'XMLHttpRequest',
-      }, '&hash=' + sesion.hash);
-      if (stratC) { sesion.threadsOk = true; sesion._strategy = 'C-hash-param'; }
-    }
-    
-    // Estrategia D: Cookies + user_uid como header
-    if (!sesion.threadsOk && sesion.userUid) {
-      const stratD = await testThreadsAccess('D-uid-header', {
-        'Cookie': sesion.cookies,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Referer': 'https://www.igms.com/app/' + (sesion.redirectUrl || 'chat.html'),
-        'X-Requested-With': 'XMLHttpRequest',
-        'X-User-Uid': sesion.userUid,
-      });
-      if (stratD) { sesion.threadsOk = true; sesion._strategy = 'D-uid-header'; }
+      if (stratB) { sesion.threadsOk = true; sesion._strategy = 'B-hash'; }
     }
     
     if (sesion.threadsOk) {
       console.log('[IGMS] ✅ Threads accesibles con estrategia: ' + sesion._strategy);
     } else {
       console.log('[IGMS] ⚠️ Threads NO accesibles — WebSocket será el canal principal');
+      console.log('[IGMS] Cookies enviadas: ' + sesion.cookies.substring(0, 200));
     }
     
     return true;
