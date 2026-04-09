@@ -19,7 +19,7 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 
-const VERSION = '5.4';
+const VERSION = '5.4.1';
 
 const CONFIG = {
   ANTHROPIC_API_KEY:    process.env.ANTHROPIC_API_KEY,
@@ -482,6 +482,71 @@ app.get('/health', (req, res) => {
     respondidos: respondidos.size,
     timestamp  : new Date().toISOString()
   });
+});
+
+// ===========================================================
+// RAW IGMS: diagnostico crudo de la API de IGMS
+// GET /igms/raw — muestra exactamente que devuelve IGMS
+// ===========================================================
+app.get('/igms/raw', async (req, res) => {
+  try {
+    const phpsessid = await getSesion();
+    if (!phpsessid) return res.json({ ok: false, error: 'Sin sesion IGMS', sesion });
+
+    // Paso 1: traer threads
+    const url = 'https://www.igms.com/api/data/threads?filters[limit]=50&filters[cursor]=0&filters[initial_load]=1&filters[category]=all';
+    const threadsRes = await axios.get(url, {
+      headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' }
+    });
+
+    const status = threadsRes.status;
+    const rawData = threadsRes.data;
+    const threadIds = (rawData && rawData.data && rawData.data.thread_ids) || [];
+
+    // Si hay threads, traer el primero como ejemplo
+    let ejemploThread = null;
+    if (threadIds.length > 0) {
+      try {
+        const tRes = await axios.get(
+          'https://www.igms.com/api/data/thread-page-data?params[thread_id]=' + threadIds[0] +
+          '&params[platform_type]=airbnb&params[owner_user_id]=' + CONFIG.IGMS_CLIENT_ID,
+          { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
+        );
+        // Mostrar las keys del scopeData para entender la estructura
+        const scope = (tRes.data && tRes.data.scopeData) || {};
+        ejemploThread = {
+          thread_id: threadIds[0],
+          scopeData_keys: Object.keys(scope),
+          tiene_Message: !!scope.Message,
+          Message_data_count: scope.Message && scope.Message.data ? Object.keys(scope.Message.data).length : 0,
+          tiene_Reservation: !!scope.Reservation,
+          data_keys: Object.keys(tRes.data.data || {}),
+        };
+      } catch(e) {
+        ejemploThread = { error: e.message };
+      }
+    }
+
+    res.json({
+      ok: true,
+      version: VERSION,
+      sesion_activa: !!phpsessid,
+      phpsessid_preview: phpsessid ? phpsessid.substring(0, 8) + '...' : null,
+      threads_http_status: status,
+      threads_response_keys: rawData ? Object.keys(rawData) : [],
+      threads_data_keys: rawData && rawData.data ? Object.keys(rawData.data) : [],
+      thread_ids_count: threadIds.length,
+      thread_ids_muestra: threadIds.slice(0, 5),
+      ejemplo_thread: ejemploThread,
+    });
+  } catch(e) {
+    res.status(500).json({
+      ok: false,
+      error: e.message,
+      status: e.response ? e.response.status : null,
+      response_data: e.response ? JSON.stringify(e.response.data).substring(0, 300) : null,
+    });
+  }
 });
 
 // ===========================================================
