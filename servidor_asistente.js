@@ -240,6 +240,10 @@ async function loginIGMS() {
       { email: CONFIG.IGMS_EMAIL, password: CONFIG.IGMS_PASSWORD, platform: 'web' },
       { headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' }, maxRedirects: 5 }
     );
+    console.log('[IGMS] Login status:', res.status, '| response type:', typeof res.data);
+    console.log('[IGMS] Login response keys:', typeof res.data === 'object' ? Object.keys(res.data).slice(0, 10) : 'no-object');
+    console.log('[IGMS] Login cookies:', (res.headers['set-cookie'] || []).length, 'cookies recibidas');
+    
     const cookies = res.headers['set-cookie'] || [];
     const phpCookie = cookies.find(c => c.includes('PHPSESSID'));
     if (phpCookie) {
@@ -247,14 +251,41 @@ async function loginIGMS() {
       if (match) {
         sesion.phpsessid = match[1];
         sesion.expira = Date.now() + 22 * 60 * 60 * 1000;
-        console.log('[IGMS] Sesion renovada OK');
+        console.log('[IGMS] Sesion renovada OK: ' + match[1].substring(0, 8) + '...');
+        
+        // Validar que la sesion funciona haciendo una peticion de prueba
+        try {
+          const testRes = await axios.get(
+            'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
+            { headers: { Cookie: 'PHPSESSID=' + sesion.phpsessid, 'User-Agent': 'Mozilla/5.0' }, responseType: 'text' }
+          );
+          const esHtml = typeof testRes.data === 'string' && testRes.data.trim().startsWith('<');
+          if (esHtml) {
+            console.error('[IGMS] Sesion NO valida - API devuelve HTML (login page)');
+            sesion.phpsessid = null;
+            sesion.expira = 0;
+            return false;
+          }
+          console.log('[IGMS] Sesion VALIDADA - API devuelve JSON');
+        } catch(e) {
+          console.error('[IGMS] Error validando sesion:', e.message);
+        }
         return true;
       }
     }
-    console.error('[IGMS] No se encontro PHPSESSID');
+    
+    // Si no hay cookie, tal vez el login devolvio un token en el body
+    if (res.data && typeof res.data === 'object') {
+      console.log('[IGMS] Login response (preview):', JSON.stringify(res.data).substring(0, 200));
+    }
+    console.error('[IGMS] No se encontro PHPSESSID en cookies');
     return false;
   } catch(e) {
     console.error('[IGMS] Login error:', e.message);
+    if (e.response) {
+      console.error('[IGMS] Login response status:', e.response.status);
+      console.error('[IGMS] Login response data:', JSON.stringify(e.response.data).substring(0, 200));
+    }
     return false;
   }
 }
@@ -381,9 +412,25 @@ async function polling() {
     if (!phpsessid) { console.log('[Poll] Sin sesion IGMS'); return; }
     const res = await axios.get(
       'https://www.igms.com/api/data/threads?filters[limit]=50&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
-      { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
+      { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' }, responseType: 'text' }
     );
-    const threadIds = extraerThreadIds(res.data);
+    
+    // Detectar si IGMS devolvio HTML (sesion invalida)
+    let data = res.data;
+    if (typeof data === 'string') {
+      if (data.trim().startsWith('<')) {
+        console.error('[Poll] IGMS devolvio HTML - sesion invalida, forzando re-login');
+        sesion.expira = 0;
+        sesion.phpsessid = null;
+        return;
+      }
+      try { data = JSON.parse(data); } catch(e) {
+        console.error('[Poll] Respuesta no es JSON:', data.substring(0, 100));
+        return;
+      }
+    }
+    
+    const threadIds = extraerThreadIds(data);
     console.log('[Poll] ' + (threadIds.length > 0 ? threadIds.length + ' threads encontrados' : 'sin mensajes nuevos'));
     for (const threadId of threadIds.slice(0, 20)) {
       await procesarThread(threadId, phpsessid);
@@ -509,6 +556,7 @@ app.get('/health', (req, res) => {
     version    : VERSION,
     socket     : socketConectado ? 'conectado' : 'reconectando',
     sesion     : sesion.phpsessid ? 'activa' : 'sin sesion',
+    sesion_expira: sesion.expira ? new Date(sesion.expira).toISOString() : null,
     polling    : 'activo cada 30s',
     respondidos: respondidos.size,
     timestamp  : new Date().toISOString()
@@ -522,22 +570,39 @@ app.get('/health', (req, res) => {
 app.get('/igms/raw', async (req, res) => {
   try {
     const phpsessid = await getSesion();
-    if (!phpsessid) return res.json({ ok: false, error: 'Sin sesion IGMS', sesion });
+    if (!phpsessid) return res.json({ ok: false, error: 'Sin sesion IGMS - login fallo' });
 
     const url = 'https://www.igms.com/api/data/threads?filters[limit]=50&filters[cursor]=0&filters[initial_load]=1&filters[category]=all';
     const threadsRes = await axios.get(url, {
-      headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' }
+      headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' },
+      responseType: 'text'
     });
 
-    const status = threadsRes.status;
-    const rawData = threadsRes.data;
-    const isArray = Array.isArray(rawData);
-    const keys = rawData ? Object.keys(rawData) : [];
+    const rawText = threadsRes.data;
+    const esHtml = typeof rawText === 'string' && rawText.trim().startsWith('<');
+    
+    if (esHtml) {
+      // Sesion invalida - IGMS redirige al login
+      return res.json({
+        ok: false,
+        version: VERSION,
+        error: 'IGMS devolvio HTML en vez de JSON - la sesion PHPSESSID no es valida',
+        html_preview: rawText.substring(0, 300),
+        phpsessid_preview: phpsessid.substring(0, 8) + '...',
+        solucion: 'El login obtiene un PHPSESSID pero IGMS no lo acepta para la API de datos. Revisar credenciales o si IGMS requiere algo adicional (2FA, captcha, etc).',
+      });
+    }
 
-    // Muestra de los primeros 3 items crudos (truncados)
+    // Parsear JSON
+    let data;
+    try { data = JSON.parse(rawText); } catch(e) {
+      return res.json({ ok: false, error: 'Respuesta no es JSON ni HTML', preview: rawText.substring(0, 300) });
+    }
+
+    const keys = data ? Object.keys(data) : [];
     const muestra = [];
     for (let i = 0; i < Math.min(3, keys.length); i++) {
-      const item = rawData[keys[i]];
+      const item = data[keys[i]];
       muestra.push({
         key: keys[i],
         type: typeof item,
@@ -546,10 +611,8 @@ app.get('/igms/raw', async (req, res) => {
       });
     }
 
-    // Usar el nuevo helper
-    const threadIds = extraerThreadIds(rawData);
+    const threadIds = extraerThreadIds(data);
 
-    // Si hay threads, traer el primero como ejemplo
     let ejemploThread = null;
     if (threadIds.length > 0) {
       try {
@@ -564,8 +627,6 @@ app.get('/igms/raw', async (req, res) => {
           scopeData_keys: Object.keys(scope),
           tiene_Message: !!scope.Message,
           Message_data_count: scope.Message && scope.Message.data ? Object.keys(scope.Message.data).length : 0,
-          tiene_Reservation: !!scope.Reservation,
-          data_keys: Object.keys(tRes.data.data || {}),
         };
       } catch(e) {
         ejemploThread = { error: e.message };
@@ -575,9 +636,7 @@ app.get('/igms/raw', async (req, res) => {
     res.json({
       ok: true,
       version: VERSION,
-      sesion_activa: !!phpsessid,
-      threads_http_status: status,
-      response_is_array: isArray,
+      sesion_activa: true,
       response_total_keys: keys.length,
       muestra_items_crudos: muestra,
       thread_ids_extraidos: threadIds.length,
@@ -586,10 +645,8 @@ app.get('/igms/raw', async (req, res) => {
     });
   } catch(e) {
     res.status(500).json({
-      ok: false,
-      error: e.message,
+      ok: false, error: e.message,
       status: e.response ? e.response.status : null,
-      response_data: e.response ? JSON.stringify(e.response.data).substring(0, 300) : null,
     });
   }
 });
