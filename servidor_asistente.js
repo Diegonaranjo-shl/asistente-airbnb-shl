@@ -1,6 +1,7 @@
 // ASISTENTE IA AIRBNB - SUPERHOST LOFT
-// servidor_asistente.js v5.3
-// Fix: setInterval fuera del bloque async para garantizar ejecucion
+// servidor_asistente.js v5.4
+// + endpoint /poll/debug para diagnostico dry-run
+// + endpoint /poll/test-send para probar envio real con un thread especifico
 
 const express = require('express');
 const axios = require('axios');
@@ -18,7 +19,7 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 
-const VERSION = '5.3';
+const VERSION = '5.4';
 
 const CONFIG = {
   ANTHROPIC_API_KEY:    process.env.ANTHROPIC_API_KEY,
@@ -478,8 +479,166 @@ app.get('/health', (req, res) => {
     socket     : socketConectado ? 'conectado' : 'reconectando',
     sesion     : sesion.phpsessid ? 'activa' : 'sin sesion',
     polling    : 'activo cada 30s',
+    respondidos: respondidos.size,
     timestamp  : new Date().toISOString()
   });
+});
+
+// ===========================================================
+// DEBUG: ver estado de threads sin enviar nada (dry-run)
+// GET /poll/debug?limit=5
+// ===========================================================
+app.get('/poll/debug', async (req, res) => {
+  try {
+    const limite = Math.min(parseInt(req.query.limit) || 5, 20);
+    const phpsessid = await getSesion();
+    if (!phpsessid) return res.json({ ok: false, error: 'Sin sesion IGMS' });
+
+    const threadsRes = await axios.get(
+      'https://www.igms.com/api/data/threads?filters[limit]=50&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
+      { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
+    );
+    const threadIds = (threadsRes.data && threadsRes.data.data && threadsRes.data.data.thread_ids) || [];
+
+    const resultados = [];
+    for (const threadId of threadIds.slice(0, limite)) {
+      try {
+        const tRes = await axios.get(
+          'https://www.igms.com/api/data/thread-page-data?params[thread_id]=' + threadId +
+          '&params[platform_type]=airbnb&params[owner_user_id]=' + CONFIG.IGMS_CLIENT_ID,
+          { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
+        );
+        const scope = (tRes.data && tRes.data.scopeData) || {};
+        const mensajes = scope.Message && scope.Message.data ? Object.values(scope.Message.data) : [];
+        mensajes.sort((a, b) => (a.dttm || '').localeCompare(b.dttm || ''));
+        const ultimo = mensajes.length ? mensajes[mensajes.length - 1] : null;
+
+        const reservas = (scope.Reservation && scope.Reservation.data) || {};
+        const resKey = Object.keys(reservas)[0];
+        const reserva = reservas[resKey] || {};
+        const data = (tRes.data && tRes.data.data) || {};
+
+        resultados.push({
+          thread_id: threadId,
+          propiedad: (reserva.listing_name || data.listing_name || '???').substring(0, 50),
+          huesped: reserva.guest_name || '???',
+          total_mensajes: mensajes.length,
+          ultimo_mensaje: ultimo ? {
+            id: ultimo.id,
+            texto: (ultimo.message_text || '').substring(0, 120),
+            es_host: ultimo.sender_id === ultimo.host_id,
+            fecha: ultimo.dttm,
+            ya_respondido: respondidos.has(ultimo.id),
+          } : null,
+          // Info de reserva si existe
+          reserva: resKey ? {
+            checkin: reserva.checkin_date || null,
+            checkout: reserva.checkout_date || null,
+            huespedes: reserva.number_of_guests || null,
+            status: reserva.status || null,
+          } : null,
+        });
+        await new Promise(r => setTimeout(r, 500));
+      } catch(e) {
+        resultados.push({ thread_id: threadId, error: e.message });
+      }
+    }
+
+    res.json({
+      ok: true,
+      version: VERSION,
+      total_threads: threadIds.length,
+      analizados: resultados.length,
+      threads: resultados,
+      nota: 'DRY-RUN: no se envio nada. Busca threads donde ultimo_mensaje.es_host=false y ya_respondido=false'
+    });
+  } catch(e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ===========================================================
+// TEST-SEND: probar respuesta real en UN thread especifico
+// POST /poll/test-send  { thread_id: 123456, dry_run: true|false }
+// dry_run=true  → genera respuesta pero NO la envia
+// dry_run=false → genera respuesta Y la envia al huesped
+// ===========================================================
+app.post('/poll/test-send', async (req, res) => {
+  try {
+    const { thread_id, dry_run } = req.body;
+    if (!thread_id) return res.json({ ok: false, error: 'Falta thread_id' });
+
+    const isDryRun = dry_run !== false; // default: true (seguro)
+    const phpsessid = await getSesion();
+    if (!phpsessid) return res.json({ ok: false, error: 'Sin sesion IGMS' });
+
+    // Traer datos del thread
+    const tRes = await axios.get(
+      'https://www.igms.com/api/data/thread-page-data?params[thread_id]=' + thread_id +
+      '&params[platform_type]=airbnb&params[owner_user_id]=' + CONFIG.IGMS_CLIENT_ID,
+      { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
+    );
+    const scope = (tRes.data && tRes.data.scopeData) || {};
+    const mensajes = scope.Message && scope.Message.data ? Object.values(scope.Message.data) : [];
+    mensajes.sort((a, b) => (a.dttm || '').localeCompare(b.dttm || ''));
+
+    // Tomar los ultimos 5 mensajes como contexto
+    const ultimos5 = mensajes.slice(-5);
+    const ultimo = mensajes.length ? mensajes[mensajes.length - 1] : null;
+    if (!ultimo) return res.json({ ok: false, error: 'Thread sin mensajes' });
+
+    const reservas = (scope.Reservation && scope.Reservation.data) || {};
+    const resKey = Object.keys(reservas)[0];
+    const reserva = reservas[resKey] || {};
+    const data = (tRes.data && tRes.data.data) || {};
+    const propiedad = reserva.listing_name || data.listing_name || 'Propiedad SHL';
+    const nombre = reserva.guest_name || 'Huesped';
+
+    // Construir contexto con historial
+    const historial = ultimos5.map(m => {
+      const quien = m.sender_id === m.host_id ? 'Host' : 'Huesped';
+      return quien + ': ' + (m.message_text || '').substring(0, 300);
+    }).join('\n');
+
+    const mensajeHuesped = ultimo.message_text || '';
+    const esHost = ultimo.sender_id === ultimo.host_id;
+
+    // Generar respuesta con Claude
+    const respuesta = await generarRespuesta(mensajeHuesped, nombre, propiedad);
+
+    let enviado = false;
+    if (!isDryRun && !esHost) {
+      enviado = await enviarMensaje(thread_id, respuesta, phpsessid);
+      if (enviado) respondidos.add(ultimo.id);
+    }
+
+    res.json({
+      ok: true,
+      dry_run: isDryRun,
+      thread_id,
+      propiedad,
+      huesped: nombre,
+      ultimo_mensaje: {
+        texto: mensajeHuesped.substring(0, 200),
+        es_host: esHost,
+        fecha: ultimo.dttm,
+      },
+      historial_reciente: ultimos5.map(m => ({
+        quien: m.sender_id === m.host_id ? 'Host' : 'Huesped',
+        texto: (m.message_text || '').substring(0, 150),
+        fecha: m.dttm,
+      })),
+      respuesta_generada: respuesta,
+      enviado: isDryRun ? 'NO (dry_run)' : (enviado ? 'SI' : 'FALLO'),
+      reserva: resKey ? {
+        checkin: reserva.checkin_date || null,
+        checkout: reserva.checkout_date || null,
+        huespedes: reserva.number_of_guests || null,
+      } : null,
+    });
+  } catch(e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 app.listen(CONFIG.PORT, () => {
