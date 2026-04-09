@@ -1,7 +1,9 @@
 // ASISTENTE IA AIRBNB - SUPERHOST LOFT
-// servidor_asistente.js v5.4
-// + endpoint /poll/debug para diagnostico dry-run
-// + endpoint /poll/test-send para probar envio real con un thread especifico
+// servidor_asistente.js v5.7
+// FIX: Login multi-paso — sigue redirect_url para capturar todas las cookies/tokens
+// FIX: Usa hash del login como posible token de auth
+// FIX: Diagnóstico mejorado de auth
+// FIX: WebSocket como canal principal de recepción
 
 const express = require('express');
 const axios = require('axios');
@@ -19,7 +21,7 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 
-const VERSION = '5.6.1';
+const VERSION = '5.7';
 
 const CONFIG = {
   ANTHROPIC_API_KEY:    process.env.ANTHROPIC_API_KEY,
@@ -37,9 +39,17 @@ const CONFIG = {
 };
 
 // ===========================================================
-// SESION IGMS
+// SESION IGMS — ahora almacena más datos de auth
 // ===========================================================
-let sesion = { phpsessid: null, allCookies: null, expira: 0 };
+let sesion = {
+  cookies: null,       // String con todas las cookies
+  hash: null,          // Hash del login (posible token)
+  userUid: null,       // user_uid del login
+  redirectUrl: null,   // redirect_url del login
+  expira: 0,
+  loginOk: false,
+  threadsOk: false,    // true si /api/data/threads responde JSON
+};
 let socket = null;
 let socketConectado = false;
 let reconectando = false;
@@ -197,13 +207,13 @@ async function generarMensajeCheckin(nombre, propiedad) {
 
 const reservasPendientes = {};
 
-async function programarCheckin(threadId, nombre, propiedad, fechaCheckin, phpsessid) {
+async function programarCheckin(threadId, nombre, propiedad, fechaCheckin) {
   const hoy = new Date().toDateString();
   const llegada = new Date(fechaCheckin).toDateString();
   if (hoy === llegada) {
     const msg = await generarMensajeCheckin(nombre, propiedad);
     if (msg) {
-      await enviarMensaje(threadId, msg, phpsessid);
+      await enviarMensaje(threadId, msg);
       console.log('[Checkin] Enviado a ' + nombre);
     }
   } else {
@@ -216,11 +226,11 @@ setInterval(async () => {
   const hoy = new Date().toDateString();
   for (const [threadId, r] of Object.entries(reservasPendientes)) {
     if (new Date(r.fechaCheckin).toDateString() === hoy) {
-      const phpsessid = await getSesion();
-      if (phpsessid) {
+      const ok = await asegurarSesion();
+      if (ok) {
         const msg = await generarMensajeCheckin(r.nombre, r.propiedad);
         if (msg) {
-          await enviarMensaje(threadId, msg, phpsessid);
+          await enviarMensaje(threadId, msg);
           console.log('[Checkin auto] ' + r.nombre);
           delete reservasPendientes[threadId];
         }
@@ -230,84 +240,251 @@ setInterval(async () => {
 }, 60 * 60 * 1000);
 
 // ===========================================================
-// LOGIN IGMS
+// LOGIN IGMS — MULTI-PASO (v5.7)
+// Paso 1: POST login → obtener wsb-user-uid + hash + redirect_url
+// Paso 2: GET redirect_url (chat.html) → capturar cookies adicionales
+// Paso 3: Probar /api/data/threads con todas las cookies
+// Paso 4: Si falla, probar con hash como X-Auth-Hash header
 // ===========================================================
 async function loginIGMS() {
   try {
-    console.log('[IGMS] Renovando sesion...');
-    const res = await axios.post(
+    console.log('[IGMS] === Login multi-paso v5.7 ===');
+    
+    // ---- PASO 1: Login POST ----
+    const loginRes = await axios.post(
       'https://www.igms.com/api/user-api/login',
       { email: CONFIG.IGMS_EMAIL, password: CONFIG.IGMS_PASSWORD, platform: 'web' },
-      { headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' }, maxRedirects: 5 }
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
+          'Origin': 'https://www.igms.com',
+          'Referer': 'https://www.igms.com/app/login.html',
+        },
+        maxRedirects: 0,
+        validateStatus: s => s < 400,
+      }
     );
     
-    // Verificar que el login fue exitoso
-    const loginErr = res.data && res.data.data && res.data.data.err;
-    const loginMsg = res.data && res.data.data && res.data.data.data && res.data.data.data.message;
-    console.log('[IGMS] Login response: err=' + loginErr + ', msg=' + loginMsg);
+    // Extraer datos del login
+    const loginData = loginRes.data?.data?.data || loginRes.data?.data || loginRes.data || {};
+    const loginErr = loginRes.data?.data?.err;
+    const loginMsg = loginData.message;
     
-    if (loginErr !== false) {
-      console.error('[IGMS] Login RECHAZADO:', loginMsg || 'error desconocido');
+    console.log('[IGMS] Paso 1 - Login: err=' + loginErr + ', msg=' + loginMsg);
+    
+    if (loginErr !== false && loginMsg !== 'ok') {
+      console.error('[IGMS] Login RECHAZADO:', JSON.stringify(loginData).substring(0, 200));
+      sesion.loginOk = false;
       return false;
     }
     
-    // Capturar TODAS las cookies
-    const cookies = res.headers['set-cookie'] || [];
-    const allCookies = cookies.map(c => c.split(';')[0]).join('; ');
-    console.log('[IGMS] Cookies recibidas (' + cookies.length + '):', allCookies.substring(0, 150));
+    // Guardar datos importantes del login
+    sesion.hash = loginData.hash || null;
+    sesion.userUid = loginData.user_uid || null;
+    sesion.redirectUrl = loginData.redirect_url || null;
     
-    if (!allCookies) {
-      console.error('[IGMS] No se recibieron cookies');
-      return false;
-    }
+    console.log('[IGMS] hash=' + (sesion.hash || 'null'));
+    console.log('[IGMS] user_uid=' + (sesion.userUid || 'null'));
+    console.log('[IGMS] redirect_url=' + (sesion.redirectUrl || 'null'));
     
-    // Guardar todas las cookies (IGMS puede usar PHPSESSID o wsb-user-uid)
-    sesion.allCookies = allCookies;
-    sesion.expira = Date.now() + 22 * 60 * 60 * 1000;
-    
-    // Extraer PHPSESSID si existe (compatibilidad)
-    const phpMatch = allCookies.match(/PHPSESSID=([^;]+)/);
-    sesion.phpsessid = phpMatch ? phpMatch[1] : 'using-wsb-cookie';
-    
-    // Validar que la sesion funciona
-    try {
-      const testRes = await axios.get(
-        'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
-        { headers: { Cookie: allCookies, 'User-Agent': 'Mozilla/5.0' }, responseType: 'text', maxRedirects: 0, validateStatus: () => true }
-      );
-      const testData = (testRes.data || '') + '';
-      const esHtml = testData.trim().startsWith('<');
-      const esRedirect = testRes.status >= 300 && testRes.status < 400;
-      console.log('[IGMS] Validacion: status=' + testRes.status + ', esHtml=' + esHtml + ', largo=' + testData.length);
-      if (esHtml || esRedirect) {
-        console.error('[IGMS] Sesion NO valida - API devuelve HTML o redirect');
-        // No invalidar la sesion — puede que la cookie funcione para otros endpoints
-        // En lugar de fallar, seguir con la sesion y dejar que el polling maneje el error
-        console.log('[IGMS] Manteniendo sesion de todas formas (wsb-user-uid)');
-      } else {
-        console.log('[IGMS] Sesion VALIDADA OK - API devuelve JSON');
+    // Capturar cookies del login
+    const loginCookies = loginRes.headers['set-cookie'] || [];
+    let cookieJar = {};
+    for (const c of loginCookies) {
+      const [nameVal] = c.split(';');
+      const eqIdx = nameVal.indexOf('=');
+      if (eqIdx > 0) {
+        cookieJar[nameVal.substring(0, eqIdx).trim()] = nameVal.substring(eqIdx + 1).trim();
       }
-    } catch(e) {
-      console.log('[IGMS] Error en validacion (continuando de todas formas):', e.message);
+    }
+    console.log('[IGMS] Cookies paso 1:', Object.keys(cookieJar).join(', '));
+    
+    // ---- PASO 2: Seguir redirect_url para obtener cookies adicionales ----
+    if (sesion.redirectUrl) {
+      try {
+        const chatUrl = 'https://www.igms.com/app/' + sesion.redirectUrl;
+        console.log('[IGMS] Paso 2 - Navegando a: ' + chatUrl);
+        
+        const chatRes = await axios.get(chatUrl, {
+          headers: {
+            'Cookie': formatCookies(cookieJar),
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Referer': 'https://www.igms.com/app/login.html',
+          },
+          maxRedirects: 5,
+          validateStatus: () => true,
+        });
+        
+        // Capturar cookies adicionales del redirect
+        const chatCookies = chatRes.headers['set-cookie'] || [];
+        for (const c of chatCookies) {
+          const [nameVal] = c.split(';');
+          const eqIdx = nameVal.indexOf('=');
+          if (eqIdx > 0) {
+            cookieJar[nameVal.substring(0, eqIdx).trim()] = nameVal.substring(eqIdx + 1).trim();
+          }
+        }
+        console.log('[IGMS] Paso 2 - Status: ' + chatRes.status + ', cookies nuevas: ' + chatCookies.length);
+        console.log('[IGMS] Cookies acumuladas: ' + Object.keys(cookieJar).join(', '));
+        
+        // Buscar si hay un token CSRF o meta tag en el HTML
+        const html = (chatRes.data || '') + '';
+        const csrfMatch = html.match(/csrf[_-]token['":\s]+['"]([^'"]+)['"]/i);
+        const metaToken = html.match(/<meta\s+name=["'](?:csrf|_token|auth)['"]\s+content=["']([^'"]+)["']/i);
+        if (csrfMatch) console.log('[IGMS] CSRF token encontrado: ' + csrfMatch[1].substring(0, 20) + '...');
+        if (metaToken) console.log('[IGMS] Meta token encontrado: ' + metaToken[1].substring(0, 20) + '...');
+        
+      } catch(e) {
+        console.log('[IGMS] Paso 2 - Error (no critico): ' + e.message);
+      }
+    }
+    
+    // ---- PASO 3: Construir cookie string final ----
+    sesion.cookies = formatCookies(cookieJar);
+    sesion.expira = Date.now() + 22 * 60 * 60 * 1000;
+    sesion.loginOk = true;
+    console.log('[IGMS] Cookie final: ' + sesion.cookies.substring(0, 150));
+    
+    // ---- PASO 4: Probar acceso a /api/data/threads con múltiples estrategias ----
+    sesion.threadsOk = false;
+    
+    // Estrategia A: Solo cookies
+    const stratA = await testThreadsAccess('A-cookies', {
+      'Cookie': sesion.cookies,
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json, text/plain, */*',
+      'Referer': 'https://www.igms.com/app/' + (sesion.redirectUrl || 'chat.html'),
+      'X-Requested-With': 'XMLHttpRequest',
+    });
+    if (stratA) { sesion.threadsOk = true; sesion._strategy = 'A-cookies'; }
+    
+    // Estrategia B: Cookies + hash como header
+    if (!sesion.threadsOk && sesion.hash) {
+      const stratB = await testThreadsAccess('B-hash-header', {
+        'Cookie': sesion.cookies,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Referer': 'https://www.igms.com/app/' + (sesion.redirectUrl || 'chat.html'),
+        'X-Requested-With': 'XMLHttpRequest',
+        'X-Auth-Hash': sesion.hash,
+        'Authorization': 'Bearer ' + sesion.hash,
+      });
+      if (stratB) { sesion.threadsOk = true; sesion._strategy = 'B-hash-header'; }
+    }
+    
+    // Estrategia C: Cookies + hash como query param
+    if (!sesion.threadsOk && sesion.hash) {
+      const stratC = await testThreadsAccess('C-hash-param', {
+        'Cookie': sesion.cookies,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Referer': 'https://www.igms.com/app/' + (sesion.redirectUrl || 'chat.html'),
+        'X-Requested-With': 'XMLHttpRequest',
+      }, '&hash=' + sesion.hash);
+      if (stratC) { sesion.threadsOk = true; sesion._strategy = 'C-hash-param'; }
+    }
+    
+    // Estrategia D: Cookies + user_uid como header
+    if (!sesion.threadsOk && sesion.userUid) {
+      const stratD = await testThreadsAccess('D-uid-header', {
+        'Cookie': sesion.cookies,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Referer': 'https://www.igms.com/app/' + (sesion.redirectUrl || 'chat.html'),
+        'X-Requested-With': 'XMLHttpRequest',
+        'X-User-Uid': sesion.userUid,
+      });
+      if (stratD) { sesion.threadsOk = true; sesion._strategy = 'D-uid-header'; }
+    }
+    
+    if (sesion.threadsOk) {
+      console.log('[IGMS] ✅ Threads accesibles con estrategia: ' + sesion._strategy);
+    } else {
+      console.log('[IGMS] ⚠️ Threads NO accesibles — WebSocket será el canal principal');
     }
     
     return true;
   } catch(e) {
     console.error('[IGMS] Login error:', e.message);
+    sesion.loginOk = false;
     return false;
   }
 }
 
-async function getSesion() {
-  if (!sesion.phpsessid || Date.now() > sesion.expira) await loginIGMS();
-  return sesion.phpsessid;
+function formatCookies(jar) {
+  return Object.entries(jar).map(([k, v]) => k + '=' + v).join('; ');
 }
 
-function getCookieHeader() {
-  // Usar todas las cookies si estan disponibles, sino solo PHPSESSID
-  if (sesion.allCookies) return sesion.allCookies;
-  if (sesion.phpsessid) return 'PHPSESSID=' + sesion.phpsessid;
-  return '';
+async function testThreadsAccess(label, headers, extraQuery) {
+  try {
+    const url = 'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all' + (extraQuery || '');
+    const res = await axios.get(url, {
+      headers,
+      responseType: 'text',
+      maxRedirects: 0,
+      validateStatus: () => true,
+    });
+    const body = (res.data || '') + '';
+    const esHtml = body.trim().startsWith('<');
+    const esRedirect = res.status >= 300 && res.status < 400;
+    const ok = !esHtml && !esRedirect && res.status === 200;
+    console.log('[IGMS] Test ' + label + ': status=' + res.status + ', html=' + esHtml + ', redirect=' + esRedirect + ', ok=' + ok);
+    if (ok) {
+      // Verificar que hay datos parseables
+      try {
+        const parsed = JSON.parse(body);
+        console.log('[IGMS] Test ' + label + ': JSON válido, keys=' + Object.keys(parsed).slice(0, 5).join(','));
+        return true;
+      } catch(e) {
+        console.log('[IGMS] Test ' + label + ': no es JSON válido');
+        return false;
+      }
+    }
+    if (esRedirect) {
+      console.log('[IGMS] Test ' + label + ': redirect a ' + (res.headers.location || 'desconocido'));
+    }
+    return false;
+  } catch(e) {
+    console.log('[IGMS] Test ' + label + ': error ' + e.message);
+    return false;
+  }
+}
+
+// Headers para requests API según la estrategia que funcionó
+function getApiHeaders() {
+  const h = {
+    'Cookie': sesion.cookies || '',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Referer': 'https://www.igms.com/app/' + (sesion.redirectUrl || 'chat.html'),
+    'X-Requested-With': 'XMLHttpRequest',
+  };
+  if (sesion._strategy === 'B-hash-header' && sesion.hash) {
+    h['X-Auth-Hash'] = sesion.hash;
+    h['Authorization'] = 'Bearer ' + sesion.hash;
+  }
+  if (sesion._strategy === 'D-uid-header' && sesion.userUid) {
+    h['X-User-Uid'] = sesion.userUid;
+  }
+  return h;
+}
+
+function getThreadsUrl() {
+  let url = 'https://www.igms.com/api/data/threads?filters[limit]=50&filters[cursor]=0&filters[initial_load]=1&filters[category]=all';
+  if (sesion._strategy === 'C-hash-param' && sesion.hash) {
+    url += '&hash=' + sesion.hash;
+  }
+  return url;
+}
+
+async function asegurarSesion() {
+  if (!sesion.loginOk || Date.now() > sesion.expira) {
+    return await loginIGMS();
+  }
+  return true;
 }
 
 // ===========================================================
@@ -328,24 +505,31 @@ async function generarRespuesta(mensaje, nombre, propiedad) {
 }
 
 // ===========================================================
-// ENVIAR MENSAJE
+// ENVIAR MENSAJE — usa los headers de la estrategia activa
 // ===========================================================
-async function enviarMensaje(threadId, mensaje, phpsessid) {
+async function enviarMensaje(threadId, mensaje) {
   try {
     const form = new FormData();
     form.append('thread_id', String(threadId));
     form.append('action_data[action_type]', 'platform-message');
     form.append('action_data[platform_type]', 'airbnb');
     form.append('action_data[message]', mensaje);
+    
+    const headers = getApiHeaders();
+    // Merge form headers
+    Object.assign(headers, form.getHeaders());
+    
     const res = await axios.post(
       'https://www.igms.com/api/user-api/send-thread-action',
       form,
-      { headers: { ...form.getHeaders(), Cookie: getCookieHeader(), 'User-Agent': 'Mozilla/5.0' } }
+      { headers, maxRedirects: 0, validateStatus: () => true }
     );
+    
     if (res.status === 200) {
       console.log('[IGMS] Mensaje enviado al thread ' + threadId);
       return true;
     }
+    console.log('[IGMS] Envío mensaje status: ' + res.status);
     return false;
   } catch(e) {
     console.error('[IGMS] Error enviando mensaje:', e.message);
@@ -354,56 +538,72 @@ async function enviarMensaje(threadId, mensaje, phpsessid) {
 }
 
 // ===========================================================
-// WEBSOCKET
+// WEBSOCKET — canal principal si REST no funciona
 // ===========================================================
 async function conectarSocket() {
   if (reconectando) return;
   reconectando = true;
-  const phpsessid = await getSesion();
-  if (!phpsessid) { reconectando = false; return; }
+  const ok = await asegurarSesion();
+  if (!ok) { reconectando = false; return; }
   if (socket) { try { socket.disconnect(); } catch(e) {} socket = null; }
+  
   socket = socketio('https://www.igms.com:8082', {
     transports: ['websocket', 'polling'],
-    extraHeaders: { Cookie: getCookieHeader() },
+    extraHeaders: {
+      Cookie: sesion.cookies || '',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    },
     reconnection: false,
   });
+  
   socket.on('connect', () => {
     socketConectado = true; reconectando = false;
     console.log('[Socket] Conectado:', socket.id);
     socket.emit('identify', { clientId: CONFIG.IGMS_CLIENT_ID });
   });
-  socket.on('disconnect', () => {
+  socket.on('disconnect', (reason) => {
     socketConectado = false;
-    console.log('[Socket] Desconectado, reconectando en 30s...');
+    console.log('[Socket] Desconectado (' + reason + '), reconectando en 30s...');
     setTimeout(() => { reconectando = false; conectarSocket(); }, 30000);
   });
-  socket.on('connect_error', () => {
+  socket.on('connect_error', (err) => {
     socketConectado = false; reconectando = false;
+    console.log('[Socket] Error conexión: ' + err.message);
     setTimeout(() => conectarSocket(), 60000);
   });
+  
+  // Escuchar TODOS los eventos para descubrir cuáles usa IGMS
+  socket.onAny((eventName, data) => {
+    console.log('[Socket] Evento "' + eventName + '":', JSON.stringify(data).substring(0, 200));
+  });
+  
   socket.on('new_message', async (data) => {
-    console.log('[Socket] Nuevo msg:', JSON.stringify(data).substring(0, 100));
+    console.log('[Socket] Nuevo msg:', JSON.stringify(data).substring(0, 150));
     await procesarMensajeSocket(data);
+  });
+  
+  // Algunos sistemas usan 'message' en vez de 'new_message'
+  socket.on('message', async (data) => {
+    if (typeof data === 'object' && (data.thread_id || data.message)) {
+      console.log('[Socket] Evento "message":', JSON.stringify(data).substring(0, 150));
+      await procesarMensajeSocket(data);
+    }
   });
 }
 
 // ===========================================================
-// HELPER: extraer thread IDs de la respuesta de IGMS
-// IGMS puede devolver: array directo, { data: { thread_ids } }, u objeto indexado
+// HELPER: extraer thread IDs
 // ===========================================================
 function extraerThreadIds(responseData) {
-  // Caso 1: respuesta es un array directo de objetos con thread_id
   if (Array.isArray(responseData)) {
     return responseData
       .map(item => item.thread_id || item.id || item)
       .filter(id => id && typeof id !== 'object')
       .slice(0, 50);
   }
-  // Caso 2: { data: { thread_ids: [...] } } (formato original documentado)
   if (responseData && responseData.data && responseData.data.thread_ids) {
     return responseData.data.thread_ids;
   }
-  // Caso 3: objeto con keys numericas (array-like) — ej: {"0": {...}, "1": {...}, ...}
   if (responseData && typeof responseData === 'object') {
     const keys = Object.keys(responseData);
     const esArrayLike = keys.length > 0 && keys.every(k => /^\d+$/.test(k));
@@ -414,29 +614,38 @@ function extraerThreadIds(responseData) {
         .filter(id => id && typeof id !== 'object')
         .slice(0, 50);
     }
+    // Caso extra: { scopeData: { Thread: { data: { ... } } } }
+    if (responseData.scopeData && responseData.scopeData.Thread && responseData.scopeData.Thread.data) {
+      return Object.keys(responseData.scopeData.Thread.data).slice(0, 50);
+    }
   }
   return [];
 }
 
 // ===========================================================
-// POLLING cada 30 segundos
+// POLLING cada 30 segundos — solo si REST funciona
 // ===========================================================
 async function polling() {
+  if (!sesion.threadsOk) {
+    // REST no funciona, depender del WebSocket
+    return;
+  }
   try {
-    const phpsessid = await getSesion();
-    if (!phpsessid) { console.log('[Poll] Sin sesion IGMS'); return; }
-    const res = await axios.get(
-      'https://www.igms.com/api/data/threads?filters[limit]=50&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
-      { headers: { Cookie: getCookieHeader(), 'User-Agent': 'Mozilla/5.0' }, responseType: 'text', maxRedirects: 0, validateStatus: () => true }
-    );
+    const ok = await asegurarSesion();
+    if (!ok) { console.log('[Poll] Sin sesion IGMS'); return; }
     
-    // Detectar si IGMS devolvio HTML (sesion invalida)
+    const res = await axios.get(getThreadsUrl(), {
+      headers: getApiHeaders(),
+      responseType: 'text',
+      maxRedirects: 0,
+      validateStatus: () => true,
+    });
+    
     let data = res.data;
     if (typeof data === 'string') {
       if (data.trim().startsWith('<')) {
-        console.error('[Poll] IGMS devolvio HTML - sesion invalida, forzando re-login');
-        sesion.expira = 0;
-        sesion.phpsessid = null;
+        console.error('[Poll] IGMS devolvió HTML — marcando threads como no accesibles');
+        sesion.threadsOk = false;
         return;
       }
       try { data = JSON.parse(data); } catch(e) {
@@ -446,39 +655,39 @@ async function polling() {
     }
     
     const threadIds = extraerThreadIds(data);
-    console.log('[Poll] ' + (threadIds.length > 0 ? threadIds.length + ' threads encontrados' : 'sin mensajes nuevos'));
+    console.log('[Poll] ' + (threadIds.length > 0 ? threadIds.length + ' threads' : 'sin threads'));
     for (const threadId of threadIds.slice(0, 20)) {
-      await procesarThread(threadId, phpsessid);
+      await procesarThread(threadId);
       await new Promise(r => setTimeout(r, 1500));
     }
   } catch(e) {
     console.error('[Poll] Error:', e.message);
-    if (e.response && (e.response.status === 401 || e.response.status === 403)) sesion.expira = 0;
+    if (e.response && (e.response.status === 401 || e.response.status === 403)) {
+      sesion.expira = 0;
+      sesion.loginOk = false;
+    }
   }
 }
 
-async function procesarThread(threadId, phpsessid) {
+async function procesarThread(threadId) {
   try {
     const res = await axios.get(
-      'https://www.igms.com/api/data/thread-page-data?params[thread_id]=' + threadId + '&params[platform_type]=airbnb&params[owner_user_id]=' + CONFIG.IGMS_CLIENT_ID,
-      { headers: { Cookie: getCookieHeader(), 'User-Agent': 'Mozilla/5.0' } }
+      'https://www.igms.com/api/data/thread-page-data?params[thread_id]=' + threadId +
+      '&params[platform_type]=airbnb&params[owner_user_id]=' + CONFIG.IGMS_CLIENT_ID,
+      { headers: getApiHeaders() }
     );
     const scope = (res.data && res.data.scopeData) || {};
-
-    // Los mensajes estan en scope.Message.data — ordenados por dttm
     const mensajes = scope.Message && scope.Message.data ? Object.values(scope.Message.data) : [];
     if (!mensajes.length) return;
     mensajes.sort((a, b) => (a.dttm || '').localeCompare(b.dttm || ''));
     const ultimo = mensajes[mensajes.length - 1];
 
-    // Detectar si es del huesped: sender_id != host_id
     const msgId = ultimo.id;
     if (!msgId || respondidos.has(msgId)) return;
     const esHost = ultimo.sender_id === ultimo.host_id;
     const mensaje = ultimo.message_text || '';
     if (esHost || !mensaje || mensaje.length < 2) return;
 
-    // Datos de la reserva
     const reservas = (scope.Reservation && scope.Reservation.data) || {};
     const resKey = Object.keys(reservas)[0];
     const reserva = reservas[resKey] || {};
@@ -491,7 +700,7 @@ async function procesarThread(threadId, phpsessid) {
     if (respondidos.size > 500) respondidos.delete(respondidos.values().next().value);
 
     const respuesta = await generarRespuesta(mensaje, nombre, propiedad);
-    const enviado = await enviarMensaje(threadId, respuesta, phpsessid);
+    const enviado = await enviarMensaje(threadId, respuesta);
     if (enviado) console.log('[Poll] Respondido a ' + nombre);
   } catch(e) {
     console.error('[Poll] Error en thread:', e.message);
@@ -509,31 +718,34 @@ async function procesarMensajeSocket(data) {
   if (respondidos.size > 500) respondidos.delete(respondidos.values().next().value);
   const nombre = data.guest_name || data.author || 'Huesped';
   const propiedad = data.listing_name || 'Propiedad SHL';
-  const phpsessid = await getSesion();
-  if (!phpsessid) return;
+  const ok = await asegurarSesion();
+  if (!ok) return;
   if ((data.event_type === 'reservation_confirmed' || data.reservation_status === 'accepted') && data.checkin_date) {
-    await programarCheckin(threadId, nombre, propiedad, data.checkin_date, phpsessid);
+    await programarCheckin(threadId, nombre, propiedad, data.checkin_date);
   }
   const respuesta = await generarRespuesta(mensaje, nombre, propiedad);
-  await enviarMensaje(threadId, respuesta, phpsessid);
+  await enviarMensaje(threadId, respuesta);
 }
 
 // ===========================================================
-// ARRANQUE — setInterval FUERA del bloque async
+// ARRANQUE
 // ===========================================================
 loginIGMS().then(() => {
   conectarSocket();
 });
 
-// Polling cada 30 segundos — FUERA del bloque async para garantizar ejecucion
 setInterval(polling, 30 * 1000);
+setInterval(() => {
+  loginIGMS().then(() => {
+    // Reconectar socket con nuevas cookies
+    if (socket) { try { socket.disconnect(); } catch(e) {} socket = null; }
+    conectarSocket();
+  });
+}, 20 * 60 * 60 * 1000);
 
-// Renovar login cada 20 horas
-setInterval(loginIGMS, 20 * 60 * 60 * 1000);
+console.log('[SHL] Asistente v' + VERSION + ' - polling + websocket');
 
-console.log('[SHL] Asistente v' + VERSION + ' - polling iniciado cada 30s');
-
-// Auto-ping para mantener activo en Render free tier
+// Auto-ping para mantener activo en Render
 setInterval(() => {
   const url = process.env.RENDER_EXTERNAL_URL;
   if (!url) return;
@@ -561,88 +773,259 @@ app.post('/test', async (req, res) => {
 
 app.post('/poll/force', async (req, res) => {
   console.log('[Poll] Forzado manualmente');
-  polling().catch(console.error);
-  res.json({ ok: true, message: 'Polling iniciado' });
+  // Forzar intentar polling aunque threadsOk sea false (para diagnostico)
+  const prevState = sesion.threadsOk;
+  sesion.threadsOk = true;
+  polling().catch(console.error).finally(() => {
+    sesion.threadsOk = prevState;
+  });
+  res.json({ ok: true, message: 'Polling forzado iniciado', threadsOk: prevState });
 });
 
 app.get('/health', (req, res) => {
   res.json({
-    status     : 'Asistente activo',
-    version    : VERSION,
-    socket     : socketConectado ? 'conectado' : 'reconectando',
-    sesion     : sesion.phpsessid ? 'activa' : 'sin sesion',
+    status: 'Asistente activo',
+    version: VERSION,
+    login: sesion.loginOk ? 'ok' : 'sin sesion',
+    threads_api: sesion.threadsOk ? 'ok (' + (sesion._strategy || '?') + ')' : 'no accesible',
+    socket: socketConectado ? 'conectado' : 'desconectado',
     sesion_expira: sesion.expira ? new Date(sesion.expira).toISOString() : null,
-    polling    : 'activo cada 30s',
+    polling: sesion.threadsOk ? 'activo cada 30s' : 'desactivado (sin acceso threads)',
+    websocket_mode: !sesion.threadsOk ? 'PRINCIPAL (REST no disponible)' : 'complementario',
     respondidos: respondidos.size,
-    timestamp  : new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 });
 
 // ===========================================================
-// LOGIN DEBUG: ver exactamente que devuelve el login de IGMS
+// LOGIN DEBUG COMPLETO v5.7
 // ===========================================================
 app.get('/igms/login-debug', async (req, res) => {
   try {
+    console.log('[Debug] Iniciando login debug completo...');
+    
+    // ---- Paso 1: Login ----
     const loginRes = await axios.post(
       'https://www.igms.com/api/user-api/login',
       { email: CONFIG.IGMS_EMAIL, password: CONFIG.IGMS_PASSWORD, platform: 'web' },
-      { headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' }, maxRedirects: 5 }
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
+          'Origin': 'https://www.igms.com',
+          'Referer': 'https://www.igms.com/app/login.html',
+        },
+        maxRedirects: 0,
+        validateStatus: s => s < 400,
+      }
     );
     
-    const cookies = loginRes.headers['set-cookie'] || [];
-    const allCookies = cookies.map(c => c.split(';')[0]).join('; ');
-    const phpMatch = allCookies.match(/PHPSESSID=([^;]+)/);
-    const phpsessid = phpMatch ? phpMatch[1] : null;
+    const loginData = loginRes.data?.data?.data || loginRes.data?.data || {};
+    const loginCookies = loginRes.headers['set-cookie'] || [];
+    let cookieJar = {};
+    for (const c of loginCookies) {
+      const [nameVal] = c.split(';');
+      const eqIdx = nameVal.indexOf('=');
+      if (eqIdx > 0) cookieJar[nameVal.substring(0, eqIdx).trim()] = nameVal.substring(eqIdx + 1).trim();
+    }
     
-    // Test con PHPSESSID
-    let testResult = 'no phpsessid';
-    let testPreview = null;
-    if (phpsessid) {
+    // ---- Paso 2: Seguir redirect ----
+    let paso2 = { status: 'no intentado', cookies_nuevas: 0 };
+    const redirectUrl = loginData.redirect_url;
+    if (redirectUrl) {
       try {
-        const testRes = await axios.get(
-          'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
-          { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' }, responseType: 'text', maxRedirects: 0, validateStatus: () => true }
-        );
-        const isHtml = typeof testRes.data === 'string' && testRes.data.trim().startsWith('<');
-        testResult = isHtml ? 'FALLO_HTML' : 'OK_JSON';
-        testPreview = (testRes.data + '').substring(0, 150);
+        const chatRes = await axios.get('https://www.igms.com/app/' + redirectUrl, {
+          headers: {
+            'Cookie': formatCookies(cookieJar),
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,*/*',
+            'Referer': 'https://www.igms.com/app/login.html',
+          },
+          maxRedirects: 5,
+          validateStatus: () => true,
+        });
+        const newCookies = chatRes.headers['set-cookie'] || [];
+        for (const c of newCookies) {
+          const [nameVal] = c.split(';');
+          const eqIdx = nameVal.indexOf('=');
+          if (eqIdx > 0) cookieJar[nameVal.substring(0, eqIdx).trim()] = nameVal.substring(eqIdx + 1).trim();
+        }
+        paso2 = {
+          status: chatRes.status,
+          url: 'https://www.igms.com/app/' + redirectUrl,
+          cookies_nuevas: newCookies.length,
+          cookies_nombres: newCookies.map(c => c.split('=')[0]).join(', '),
+          html_largo: ((chatRes.data || '') + '').length,
+        };
       } catch(e) {
-        testResult = 'ERROR: ' + e.message;
+        paso2 = { status: 'error', error: e.message };
       }
     }
     
-    // Test con ALL cookies
-    let testResult2 = 'no cookies';
-    if (allCookies) {
-      try {
-        const testRes2 = await axios.get(
-          'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
-          { headers: { Cookie: allCookies, 'User-Agent': 'Mozilla/5.0' }, responseType: 'text', maxRedirects: 0, validateStatus: () => true }
-        );
-        const isHtml2 = typeof testRes2.data === 'string' && testRes2.data.trim().startsWith('<');
-        testResult2 = isHtml2 ? 'FALLO_HTML' : 'OK_JSON';
-      } catch(e) {
-        testResult2 = 'ERROR: ' + e.message;
-      }
+    // ---- Paso 3: Probar todas las estrategias ----
+    const allCookies = formatCookies(cookieJar);
+    const hash = loginData.hash;
+    const userUid = loginData.user_uid;
+    
+    const estrategias = {};
+    
+    // A: Solo cookies
+    estrategias['A_solo_cookies'] = await testAndDescribe(
+      'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
+      { 'Cookie': allCookies, 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://www.igms.com/app/chat.html' }
+    );
+    
+    // B: Cookies + X-Auth-Hash + Authorization Bearer
+    if (hash) {
+      estrategias['B_hash_headers'] = await testAndDescribe(
+        'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
+        { 'Cookie': allCookies, 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-Auth-Hash': hash, 'Authorization': 'Bearer ' + hash, 'Referer': 'https://www.igms.com/app/chat.html' }
+      );
     }
+    
+    // C: Hash como query param
+    if (hash) {
+      estrategias['C_hash_query'] = await testAndDescribe(
+        'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all&hash=' + hash,
+        { 'Cookie': allCookies, 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://www.igms.com/app/chat.html' }
+      );
+    }
+    
+    // D: user_uid header
+    if (userUid) {
+      estrategias['D_uid_header'] = await testAndDescribe(
+        'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
+        { 'Cookie': allCookies, 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-User-Uid': userUid, 'Referer': 'https://www.igms.com/app/chat.html' }
+      );
+    }
+    
+    // E: Sin cookies, solo hash como Bearer
+    if (hash) {
+      estrategias['E_solo_bearer'] = await testAndDescribe(
+        'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
+        { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'Authorization': 'Bearer ' + hash }
+      );
+    }
+    
+    // F: Probar thread-page-data directamente (puede tener auth diferente)
+    estrategias['F_thread_page_direct'] = await testAndDescribe(
+      'https://www.igms.com/api/data/thread-page-data?params[thread_id]=1&params[platform_type]=airbnb&params[owner_user_id]=' + CONFIG.IGMS_CLIENT_ID,
+      { 'Cookie': allCookies, 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://www.igms.com/app/chat.html' }
+    );
+    
+    // G: send-thread-action (test auth de envío)
+    estrategias['G_send_action_auth'] = await testAndDescribe(
+      'https://www.igms.com/api/user-api/send-thread-action',
+      { 'Cookie': allCookies, 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'Referer': 'https://www.igms.com/app/chat.html' },
+      'POST'
+    );
     
     res.json({
       ok: true,
       version: VERSION,
-      login_status: loginRes.status,
-      login_response_keys: Object.keys(loginRes.data || {}),
-      login_data_keys: loginRes.data && loginRes.data.data ? Object.keys(loginRes.data.data).slice(0, 20) : null,
-      login_data_preview: loginRes.data && loginRes.data.data ? JSON.stringify(loginRes.data.data).substring(0, 500) : null,
-      login_scopeData_keys: loginRes.data && loginRes.data.scopeData ? Object.keys(loginRes.data.scopeData).slice(0, 20) : null,
-      login_status_field: loginRes.data ? loginRes.data.status : null,
-      login_version: loginRes.data ? loginRes.data.version : null,
-      cookies_count: cookies.length,
-      cookies_raw: cookies.map(c => c.substring(0, 100)),
-      all_cookies_string: allCookies.substring(0, 200),
-      phpsessid: phpsessid ? phpsessid.substring(0, 10) + '...' : null,
-      test_solo_phpsessid: testResult,
-      test_todas_cookies: testResult2,
-      test_preview: testPreview,
+      paso1_login: {
+        status: loginRes.status,
+        err: loginRes.data?.data?.err,
+        message: loginData.message,
+        hash: hash ? hash.substring(0, 12) + '...' : null,
+        user_uid: userUid ? userUid.substring(0, 10) + '...' : null,
+        redirect_url: redirectUrl,
+        cookies_recibidas: Object.keys(cookieJar).join(', '),
+      },
+      paso2_redirect: paso2,
+      cookies_totales: {
+        nombres: Object.keys(cookieJar).join(', '),
+        string_preview: allCookies.substring(0, 200),
+      },
+      paso3_estrategias: estrategias,
+      recomendacion: Object.entries(estrategias).find(([k, v]) => v.ok)?.[0] || 'NINGUNA FUNCIONO — necesitamos capturar headers del navegador real',
+    });
+  } catch(e) {
+    res.status(500).json({ ok: false, error: e.message, stack: e.stack?.substring(0, 300) });
+  }
+});
+
+async function testAndDescribe(url, headers, method) {
+  try {
+    const config = {
+      headers,
+      responseType: 'text',
+      maxRedirects: 0,
+      validateStatus: () => true,
+    };
+    const res = method === 'POST'
+      ? await axios.post(url, {}, config)
+      : await axios.get(url, config);
+    
+    const body = (res.data || '') + '';
+    const esHtml = body.trim().startsWith('<');
+    const esRedirect = res.status >= 300 && res.status < 400;
+    const ok = !esHtml && !esRedirect && res.status >= 200 && res.status < 300;
+    
+    return {
+      ok,
+      status: res.status,
+      es_html: esHtml,
+      es_redirect: esRedirect,
+      redirect_to: esRedirect ? res.headers.location : undefined,
+      preview: body.substring(0, 200),
+      content_type: res.headers['content-type'],
+      nuevas_cookies: (res.headers['set-cookie'] || []).map(c => c.split('=')[0]).join(', ') || 'ninguna',
+    };
+  } catch(e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// ===========================================================
+// RAW IGMS: diagnostico crudo
+// ===========================================================
+app.get('/igms/raw', async (req, res) => {
+  try {
+    const ok = await asegurarSesion();
+    if (!ok) return res.json({ ok: false, error: 'Sin sesion IGMS - login fallo' });
+
+    const threadsRes = await axios.get(getThreadsUrl(), {
+      headers: getApiHeaders(),
+      responseType: 'text',
+      maxRedirects: 0,
+      validateStatus: () => true,
+    });
+
+    const rawText = (threadsRes.data || '') + '';
+    const esHtml = rawText.trim().startsWith('<');
+    const esRedirect = threadsRes.status >= 300 && threadsRes.status < 400;
+    
+    if (esHtml || esRedirect) {
+      return res.json({
+        ok: false,
+        version: VERSION,
+        status: threadsRes.status,
+        strategy: sesion._strategy || 'ninguna',
+        error: 'IGMS no autoriza — devuelve HTML/redirect',
+        redirect_to: threadsRes.headers.location || null,
+        html_preview: rawText.substring(0, 300),
+        cookies_enviadas: (sesion.cookies || '').substring(0, 100),
+        solucion: 'Usar /igms/login-debug para ver todas las estrategias. Si ninguna funciona, necesitamos capturar los headers del navegador real con Chrome DevTools.',
+      });
+    }
+
+    let data;
+    try { data = JSON.parse(rawText); } catch(e) {
+      return res.json({ ok: false, error: 'Respuesta no es JSON', preview: rawText.substring(0, 300) });
+    }
+
+    const threadIds = extraerThreadIds(data);
+    
+    res.json({
+      ok: true,
+      version: VERSION,
+      strategy: sesion._strategy,
+      total_keys: Object.keys(data).length,
+      thread_ids: threadIds.length,
+      thread_ids_muestra: threadIds.slice(0, 5),
+      data_preview: JSON.stringify(data).substring(0, 500),
     });
   } catch(e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -650,130 +1033,103 @@ app.get('/igms/login-debug', async (req, res) => {
 });
 
 // ===========================================================
-// RAW IGMS: diagnostico crudo de la API de IGMS
-// GET /igms/raw — muestra exactamente que devuelve IGMS
+// CAPTURE HELPER: endpoint para inyectar cookies del navegador
+// POST /igms/inject-cookies  { cookies: "PHPSESSID=xxx; wsb-user-uid=yyy; otro=zzz" }
 // ===========================================================
-app.get('/igms/raw', async (req, res) => {
+app.post('/igms/inject-cookies', async (req, res) => {
   try {
-    const phpsessid = await getSesion();
-    if (!phpsessid) return res.json({ ok: false, error: 'Sin sesion IGMS - login fallo' });
-
-    const url = 'https://www.igms.com/api/data/threads?filters[limit]=50&filters[cursor]=0&filters[initial_load]=1&filters[category]=all';
-    const threadsRes = await axios.get(url, {
-      headers: { Cookie: getCookieHeader(), 'User-Agent': 'Mozilla/5.0' },
-      responseType: 'text'
-    });
-
-    const rawText = threadsRes.data;
-    const esHtml = typeof rawText === 'string' && rawText.trim().startsWith('<');
+    const { cookies } = req.body;
+    if (!cookies || typeof cookies !== 'string') {
+      return res.json({ ok: false, error: 'Enviar { cookies: "PHPSESSID=xxx; wsb-user-uid=yyy" }' });
+    }
     
-    if (esHtml) {
-      // Sesion invalida - IGMS redirige al login
-      return res.json({
-        ok: false,
-        version: VERSION,
-        error: 'IGMS devolvio HTML en vez de JSON - la sesion PHPSESSID no es valida',
-        html_preview: rawText.substring(0, 300),
-        phpsessid_preview: phpsessid.substring(0, 8) + '...',
-        solucion: 'El login obtiene un PHPSESSID pero IGMS no lo acepta para la API de datos. Revisar credenciales o si IGMS requiere algo adicional (2FA, captcha, etc).',
-      });
-    }
-
-    // Parsear JSON
-    let data;
-    try { data = JSON.parse(rawText); } catch(e) {
-      return res.json({ ok: false, error: 'Respuesta no es JSON ni HTML', preview: rawText.substring(0, 300) });
-    }
-
-    const keys = data ? Object.keys(data) : [];
-    const muestra = [];
-    for (let i = 0; i < Math.min(3, keys.length); i++) {
-      const item = data[keys[i]];
-      muestra.push({
-        key: keys[i],
-        type: typeof item,
-        keys_del_item: typeof item === 'object' && item ? Object.keys(item).slice(0, 15) : null,
-        preview: JSON.stringify(item).substring(0, 300),
-      });
-    }
-
-    const threadIds = extraerThreadIds(data);
-
-    let ejemploThread = null;
-    if (threadIds.length > 0) {
-      try {
-        const tRes = await axios.get(
-          'https://www.igms.com/api/data/thread-page-data?params[thread_id]=' + threadIds[0] +
-          '&params[platform_type]=airbnb&params[owner_user_id]=' + CONFIG.IGMS_CLIENT_ID,
-          { headers: { Cookie: getCookieHeader(), 'User-Agent': 'Mozilla/5.0' } }
-        );
-        const scope = (tRes.data && tRes.data.scopeData) || {};
-        ejemploThread = {
-          thread_id: threadIds[0],
-          scopeData_keys: Object.keys(scope),
-          tiene_Message: !!scope.Message,
-          Message_data_count: scope.Message && scope.Message.data ? Object.keys(scope.Message.data).length : 0,
-        };
-      } catch(e) {
-        ejemploThread = { error: e.message };
+    console.log('[IGMS] Inyectando cookies del navegador: ' + cookies.substring(0, 100));
+    
+    // Guardar las cookies inyectadas
+    sesion.cookies = cookies;
+    sesion.loginOk = true;
+    sesion.expira = Date.now() + 22 * 60 * 60 * 1000;
+    sesion._strategy = 'INYECTADA';
+    
+    // Probar acceso con las cookies inyectadas
+    const testResult = await testAndDescribe(
+      'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
+      {
+        'Cookie': cookies,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Referer': 'https://www.igms.com/app/chat.html',
       }
-    }
-
+    );
+    
+    sesion.threadsOk = testResult.ok;
+    
     res.json({
       ok: true,
-      version: VERSION,
-      sesion_activa: true,
-      response_total_keys: keys.length,
-      muestra_items_crudos: muestra,
-      thread_ids_extraidos: threadIds.length,
-      thread_ids_muestra: threadIds.slice(0, 5),
-      ejemplo_thread: ejemploThread,
+      cookies_inyectadas: cookies.substring(0, 100) + '...',
+      test_threads: testResult,
+      threads_ok: sesion.threadsOk,
+      mensaje: sesion.threadsOk
+        ? '✅ Cookies funcionan! El polling usará estas cookies.'
+        : '❌ Cookies no autorizan threads. Verifica que copiaste TODAS las cookies del navegador.',
     });
   } catch(e) {
-    res.status(500).json({
-      ok: false, error: e.message,
-      status: e.response ? e.response.status : null,
-    });
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 
 // ===========================================================
 // DEBUG: ver estado de threads sin enviar nada (dry-run)
-// GET /poll/debug?limit=5
 // ===========================================================
 app.get('/poll/debug', async (req, res) => {
   try {
+    if (!sesion.threadsOk && sesion._strategy !== 'INYECTADA') {
+      return res.json({
+        ok: false,
+        version: VERSION,
+        error: 'REST API de threads no accesible. Opciones: 1) /igms/login-debug para ver estrategias. 2) /igms/inject-cookies para inyectar cookies del navegador.',
+        socket: socketConectado ? 'conectado (canal principal)' : 'desconectado',
+      });
+    }
+    
     const limite = Math.min(parseInt(req.query.limit) || 5, 20);
-    const phpsessid = await getSesion();
-    if (!phpsessid) return res.json({ ok: false, error: 'Sin sesion IGMS' });
-
-    const threadsRes = await axios.get(
-      'https://www.igms.com/api/data/threads?filters[limit]=50&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
-      { headers: { Cookie: getCookieHeader(), 'User-Agent': 'Mozilla/5.0' } }
-    );
-    const threadIds = extraerThreadIds(threadsRes.data);
-
+    
+    const threadsRes = await axios.get(getThreadsUrl(), {
+      headers: getApiHeaders(),
+      responseType: 'text',
+      maxRedirects: 0,
+      validateStatus: () => true,
+    });
+    
+    let data = threadsRes.data;
+    if (typeof data === 'string') {
+      if (data.trim().startsWith('<')) return res.json({ ok: false, error: 'HTML recibido — sesion inválida' });
+      try { data = JSON.parse(data); } catch(e) { return res.json({ ok: false, error: 'No JSON' }); }
+    }
+    
+    const threadIds = extraerThreadIds(data);
     const resultados = [];
+    
     for (const threadId of threadIds.slice(0, limite)) {
       try {
         const tRes = await axios.get(
           'https://www.igms.com/api/data/thread-page-data?params[thread_id]=' + threadId +
           '&params[platform_type]=airbnb&params[owner_user_id]=' + CONFIG.IGMS_CLIENT_ID,
-          { headers: { Cookie: getCookieHeader(), 'User-Agent': 'Mozilla/5.0' } }
+          { headers: getApiHeaders() }
         );
         const scope = (tRes.data && tRes.data.scopeData) || {};
         const mensajes = scope.Message && scope.Message.data ? Object.values(scope.Message.data) : [];
         mensajes.sort((a, b) => (a.dttm || '').localeCompare(b.dttm || ''));
         const ultimo = mensajes.length ? mensajes[mensajes.length - 1] : null;
-
         const reservas = (scope.Reservation && scope.Reservation.data) || {};
         const resKey = Object.keys(reservas)[0];
         const reserva = reservas[resKey] || {};
-        const data = (tRes.data && tRes.data.data) || {};
+        const tData = (tRes.data && tRes.data.data) || {};
 
         resultados.push({
           thread_id: threadId,
-          propiedad: (reserva.listing_name || data.listing_name || '???').substring(0, 50),
+          propiedad: (reserva.listing_name || tData.listing_name || '???').substring(0, 50),
           huesped: reserva.guest_name || '???',
           total_mensajes: mensajes.length,
           ultimo_mensaje: ultimo ? {
@@ -783,7 +1139,6 @@ app.get('/poll/debug', async (req, res) => {
             fecha: ultimo.dttm,
             ya_respondido: respondidos.has(ultimo.id),
           } : null,
-          // Info de reserva si existe
           reserva: resKey ? {
             checkin: reserva.checkin_date || null,
             checkout: reserva.checkout_date || null,
@@ -800,10 +1155,11 @@ app.get('/poll/debug', async (req, res) => {
     res.json({
       ok: true,
       version: VERSION,
+      strategy: sesion._strategy,
       total_threads: threadIds.length,
       analizados: resultados.length,
       threads: resultados,
-      nota: 'DRY-RUN: no se envio nada. Busca threads donde ultimo_mensaje.es_host=false y ya_respondido=false'
+      nota: 'DRY-RUN: no se envió nada.'
     });
   } catch(e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -811,31 +1167,24 @@ app.get('/poll/debug', async (req, res) => {
 });
 
 // ===========================================================
-// TEST-SEND: probar respuesta real en UN thread especifico
-// POST /poll/test-send  { thread_id: 123456, dry_run: true|false }
-// dry_run=true  → genera respuesta pero NO la envia
-// dry_run=false → genera respuesta Y la envia al huesped
+// TEST-SEND
 // ===========================================================
 app.post('/poll/test-send', async (req, res) => {
   try {
     const { thread_id, dry_run } = req.body;
     if (!thread_id) return res.json({ ok: false, error: 'Falta thread_id' });
+    const isDryRun = dry_run !== false;
+    const ok = await asegurarSesion();
+    if (!ok) return res.json({ ok: false, error: 'Sin sesion IGMS' });
 
-    const isDryRun = dry_run !== false; // default: true (seguro)
-    const phpsessid = await getSesion();
-    if (!phpsessid) return res.json({ ok: false, error: 'Sin sesion IGMS' });
-
-    // Traer datos del thread
     const tRes = await axios.get(
       'https://www.igms.com/api/data/thread-page-data?params[thread_id]=' + thread_id +
       '&params[platform_type]=airbnb&params[owner_user_id]=' + CONFIG.IGMS_CLIENT_ID,
-      { headers: { Cookie: getCookieHeader(), 'User-Agent': 'Mozilla/5.0' } }
+      { headers: getApiHeaders() }
     );
     const scope = (tRes.data && tRes.data.scopeData) || {};
     const mensajes = scope.Message && scope.Message.data ? Object.values(scope.Message.data) : [];
     mensajes.sort((a, b) => (a.dttm || '').localeCompare(b.dttm || ''));
-
-    // Tomar los ultimos 5 mensajes como contexto
     const ultimos5 = mensajes.slice(-5);
     const ultimo = mensajes.length ? mensajes[mensajes.length - 1] : null;
     if (!ultimo) return res.json({ ok: false, error: 'Thread sin mensajes' });
@@ -846,22 +1195,14 @@ app.post('/poll/test-send', async (req, res) => {
     const data = (tRes.data && tRes.data.data) || {};
     const propiedad = reserva.listing_name || data.listing_name || 'Propiedad SHL';
     const nombre = reserva.guest_name || 'Huesped';
-
-    // Construir contexto con historial
-    const historial = ultimos5.map(m => {
-      const quien = m.sender_id === m.host_id ? 'Host' : 'Huesped';
-      return quien + ': ' + (m.message_text || '').substring(0, 300);
-    }).join('\n');
-
-    const mensajeHuesped = ultimo.message_text || '';
     const esHost = ultimo.sender_id === ultimo.host_id;
+    const mensajeHuesped = ultimo.message_text || '';
 
-    // Generar respuesta con Claude
     const respuesta = await generarRespuesta(mensajeHuesped, nombre, propiedad);
 
     let enviado = false;
     if (!isDryRun && !esHost) {
-      enviado = await enviarMensaje(thread_id, respuesta, phpsessid);
+      enviado = await enviarMensaje(thread_id, respuesta);
       if (enviado) respondidos.add(ultimo.id);
     }
 
@@ -892,6 +1233,23 @@ app.post('/poll/test-send', async (req, res) => {
   } catch(e) {
     res.status(500).json({ ok: false, error: e.message });
   }
+});
+
+// ===========================================================
+// SOCKET DEBUG: ver estado del WebSocket
+// ===========================================================
+app.get('/socket/debug', (req, res) => {
+  res.json({
+    ok: true,
+    version: VERSION,
+    conectado: socketConectado,
+    socket_id: socket?.id || null,
+    reconectando,
+    sesion_login: sesion.loginOk,
+    threads_rest: sesion.threadsOk,
+    modo: sesion.threadsOk ? 'REST + WebSocket' : 'Solo WebSocket',
+    nota: 'Si REST no funciona, el WebSocket es el único canal para recibir mensajes. Los eventos aparecen en los logs del servidor.',
+  });
 });
 
 app.listen(CONFIG.PORT, () => {
