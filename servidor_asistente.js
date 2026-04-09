@@ -241,51 +241,69 @@ async function loginIGMS() {
       { headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' }, maxRedirects: 5 }
     );
     console.log('[IGMS] Login status:', res.status, '| response type:', typeof res.data);
-    console.log('[IGMS] Login response keys:', typeof res.data === 'object' ? Object.keys(res.data).slice(0, 10) : 'no-object');
-    console.log('[IGMS] Login cookies:', (res.headers['set-cookie'] || []).length, 'cookies recibidas');
+    console.log('[IGMS] Login response keys:', typeof res.data === 'object' ? Object.keys(res.data) : 'no-object');
     
+    // Log ALL cookies
     const cookies = res.headers['set-cookie'] || [];
+    console.log('[IGMS] Todas las cookies (' + cookies.length + '):');
+    cookies.forEach((c, i) => console.log('[IGMS]   cookie[' + i + ']:', c.substring(0, 120)));
+    
+    // Log status/data from login response
+    if (res.data && res.data.status) console.log('[IGMS] Login response status:', res.data.status);
+    if (res.data && res.data.data) console.log('[IGMS] Login data keys:', Object.keys(res.data.data).slice(0, 15));
+    
+    // Capturar TODAS las cookies, no solo PHPSESSID
+    const allCookies = cookies.map(c => c.split(';')[0]).join('; ');
+    console.log('[IGMS] Cookie string completa:', allCookies.substring(0, 200));
+    
     const phpCookie = cookies.find(c => c.includes('PHPSESSID'));
     if (phpCookie) {
       const match = phpCookie.match(/PHPSESSID=([^;]+)/);
       if (match) {
         sesion.phpsessid = match[1];
+        sesion.allCookies = allCookies; // Guardar TODAS las cookies
         sesion.expira = Date.now() + 22 * 60 * 60 * 1000;
-        console.log('[IGMS] Sesion renovada OK: ' + match[1].substring(0, 8) + '...');
+        console.log('[IGMS] PHPSESSID: ' + match[1].substring(0, 8) + '...');
         
-        // Validar que la sesion funciona haciendo una peticion de prueba
+        // Validar: probar con SOLO phpsessid vs TODAS las cookies
         try {
-          const testRes = await axios.get(
+          // Test 1: solo PHPSESSID
+          const test1 = await axios.get(
             'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
             { headers: { Cookie: 'PHPSESSID=' + sesion.phpsessid, 'User-Agent': 'Mozilla/5.0' }, responseType: 'text' }
           );
-          const esHtml = typeof testRes.data === 'string' && testRes.data.trim().startsWith('<');
-          if (esHtml) {
-            console.error('[IGMS] Sesion NO valida - API devuelve HTML (login page)');
+          const esHtml1 = typeof test1.data === 'string' && test1.data.trim().startsWith('<');
+          console.log('[IGMS] Test solo PHPSESSID:', esHtml1 ? 'FALLO (HTML)' : 'OK (JSON)');
+          
+          // Test 2: TODAS las cookies
+          const test2 = await axios.get(
+            'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
+            { headers: { Cookie: allCookies, 'User-Agent': 'Mozilla/5.0' }, responseType: 'text' }
+          );
+          const esHtml2 = typeof test2.data === 'string' && test2.data.trim().startsWith('<');
+          console.log('[IGMS] Test TODAS las cookies:', esHtml2 ? 'FALLO (HTML)' : 'OK (JSON)');
+          
+          if (!esHtml2 && esHtml1) {
+            console.log('[IGMS] *** NECESITA TODAS LAS COOKIES, no solo PHPSESSID ***');
+          }
+          if (esHtml1 && esHtml2) {
+            console.error('[IGMS] Ambos tests fallan — sesion no valida');
             sesion.phpsessid = null;
             sesion.expira = 0;
             return false;
           }
-          console.log('[IGMS] Sesion VALIDADA - API devuelve JSON');
         } catch(e) {
-          console.error('[IGMS] Error validando sesion:', e.message);
+          console.error('[IGMS] Error validando:', e.message);
         }
         return true;
       }
     }
     
-    // Si no hay cookie, tal vez el login devolvio un token en el body
-    if (res.data && typeof res.data === 'object') {
-      console.log('[IGMS] Login response (preview):', JSON.stringify(res.data).substring(0, 200));
-    }
     console.error('[IGMS] No se encontro PHPSESSID en cookies');
     return false;
   } catch(e) {
     console.error('[IGMS] Login error:', e.message);
-    if (e.response) {
-      console.error('[IGMS] Login response status:', e.response.status);
-      console.error('[IGMS] Login response data:', JSON.stringify(e.response.data).substring(0, 200));
-    }
+    if (e.response) console.error('[IGMS] Status:', e.response.status, 'Data:', JSON.stringify(e.response.data).substring(0, 200));
     return false;
   }
 }
@@ -293,6 +311,13 @@ async function loginIGMS() {
 async function getSesion() {
   if (!sesion.phpsessid || Date.now() > sesion.expira) await loginIGMS();
   return sesion.phpsessid;
+}
+
+function getCookieHeader() {
+  // Usar todas las cookies si estan disponibles, sino solo PHPSESSID
+  if (sesion.allCookies) return sesion.allCookies;
+  if (sesion.phpsessid) return 'PHPSESSID=' + sesion.phpsessid;
+  return '';
 }
 
 // ===========================================================
@@ -325,7 +350,7 @@ async function enviarMensaje(threadId, mensaje, phpsessid) {
     const res = await axios.post(
       'https://www.igms.com/api/user-api/send-thread-action',
       form,
-      { headers: { ...form.getHeaders(), Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
+      { headers: { ...form.getHeaders(), Cookie: getCookieHeader(), 'User-Agent': 'Mozilla/5.0' } }
     );
     if (res.status === 200) {
       console.log('[IGMS] Mensaje enviado al thread ' + threadId);
@@ -349,7 +374,7 @@ async function conectarSocket() {
   if (socket) { try { socket.disconnect(); } catch(e) {} socket = null; }
   socket = socketio('https://www.igms.com:8082', {
     transports: ['websocket', 'polling'],
-    extraHeaders: { Cookie: 'PHPSESSID=' + phpsessid },
+    extraHeaders: { Cookie: getCookieHeader() },
     reconnection: false,
   });
   socket.on('connect', () => {
@@ -412,7 +437,7 @@ async function polling() {
     if (!phpsessid) { console.log('[Poll] Sin sesion IGMS'); return; }
     const res = await axios.get(
       'https://www.igms.com/api/data/threads?filters[limit]=50&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
-      { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' }, responseType: 'text' }
+      { headers: { Cookie: getCookieHeader(), 'User-Agent': 'Mozilla/5.0' }, responseType: 'text' }
     );
     
     // Detectar si IGMS devolvio HTML (sesion invalida)
@@ -446,7 +471,7 @@ async function procesarThread(threadId, phpsessid) {
   try {
     const res = await axios.get(
       'https://www.igms.com/api/data/thread-page-data?params[thread_id]=' + threadId + '&params[platform_type]=airbnb&params[owner_user_id]=' + CONFIG.IGMS_CLIENT_ID,
-      { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
+      { headers: { Cookie: getCookieHeader(), 'User-Agent': 'Mozilla/5.0' } }
     );
     const scope = (res.data && res.data.scopeData) || {};
 
@@ -574,7 +599,7 @@ app.get('/igms/raw', async (req, res) => {
 
     const url = 'https://www.igms.com/api/data/threads?filters[limit]=50&filters[cursor]=0&filters[initial_load]=1&filters[category]=all';
     const threadsRes = await axios.get(url, {
-      headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' },
+      headers: { Cookie: getCookieHeader(), 'User-Agent': 'Mozilla/5.0' },
       responseType: 'text'
     });
 
@@ -619,7 +644,7 @@ app.get('/igms/raw', async (req, res) => {
         const tRes = await axios.get(
           'https://www.igms.com/api/data/thread-page-data?params[thread_id]=' + threadIds[0] +
           '&params[platform_type]=airbnb&params[owner_user_id]=' + CONFIG.IGMS_CLIENT_ID,
-          { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
+          { headers: { Cookie: getCookieHeader(), 'User-Agent': 'Mozilla/5.0' } }
         );
         const scope = (tRes.data && tRes.data.scopeData) || {};
         ejemploThread = {
@@ -663,7 +688,7 @@ app.get('/poll/debug', async (req, res) => {
 
     const threadsRes = await axios.get(
       'https://www.igms.com/api/data/threads?filters[limit]=50&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
-      { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
+      { headers: { Cookie: getCookieHeader(), 'User-Agent': 'Mozilla/5.0' } }
     );
     const threadIds = extraerThreadIds(threadsRes.data);
 
@@ -673,7 +698,7 @@ app.get('/poll/debug', async (req, res) => {
         const tRes = await axios.get(
           'https://www.igms.com/api/data/thread-page-data?params[thread_id]=' + threadId +
           '&params[platform_type]=airbnb&params[owner_user_id]=' + CONFIG.IGMS_CLIENT_ID,
-          { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
+          { headers: { Cookie: getCookieHeader(), 'User-Agent': 'Mozilla/5.0' } }
         );
         const scope = (tRes.data && tRes.data.scopeData) || {};
         const mensajes = scope.Message && scope.Message.data ? Object.values(scope.Message.data) : [];
@@ -743,7 +768,7 @@ app.post('/poll/test-send', async (req, res) => {
     const tRes = await axios.get(
       'https://www.igms.com/api/data/thread-page-data?params[thread_id]=' + thread_id +
       '&params[platform_type]=airbnb&params[owner_user_id]=' + CONFIG.IGMS_CLIENT_ID,
-      { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
+      { headers: { Cookie: getCookieHeader(), 'User-Agent': 'Mozilla/5.0' } }
     );
     const scope = (tRes.data && tRes.data.scopeData) || {};
     const mensajes = scope.Message && scope.Message.data ? Object.values(scope.Message.data) : [];
