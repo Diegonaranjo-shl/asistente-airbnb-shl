@@ -589,6 +589,77 @@ app.get('/health', (req, res) => {
 });
 
 // ===========================================================
+// LOGIN DEBUG: ver exactamente que devuelve el login de IGMS
+// ===========================================================
+app.get('/igms/login-debug', async (req, res) => {
+  try {
+    const loginRes = await axios.post(
+      'https://www.igms.com/api/user-api/login',
+      { email: CONFIG.IGMS_EMAIL, password: CONFIG.IGMS_PASSWORD, platform: 'web' },
+      { headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' }, maxRedirects: 5 }
+    );
+    
+    const cookies = loginRes.headers['set-cookie'] || [];
+    const allCookies = cookies.map(c => c.split(';')[0]).join('; ');
+    const phpMatch = allCookies.match(/PHPSESSID=([^;]+)/);
+    const phpsessid = phpMatch ? phpMatch[1] : null;
+    
+    // Test con PHPSESSID
+    let testResult = 'no phpsessid';
+    let testPreview = null;
+    if (phpsessid) {
+      try {
+        const testRes = await axios.get(
+          'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
+          { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' }, responseType: 'text', maxRedirects: 0, validateStatus: () => true }
+        );
+        const isHtml = typeof testRes.data === 'string' && testRes.data.trim().startsWith('<');
+        testResult = isHtml ? 'FALLO_HTML' : 'OK_JSON';
+        testPreview = (testRes.data + '').substring(0, 150);
+      } catch(e) {
+        testResult = 'ERROR: ' + e.message;
+      }
+    }
+    
+    // Test con ALL cookies
+    let testResult2 = 'no cookies';
+    if (allCookies) {
+      try {
+        const testRes2 = await axios.get(
+          'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
+          { headers: { Cookie: allCookies, 'User-Agent': 'Mozilla/5.0' }, responseType: 'text', maxRedirects: 0, validateStatus: () => true }
+        );
+        const isHtml2 = typeof testRes2.data === 'string' && testRes2.data.trim().startsWith('<');
+        testResult2 = isHtml2 ? 'FALLO_HTML' : 'OK_JSON';
+      } catch(e) {
+        testResult2 = 'ERROR: ' + e.message;
+      }
+    }
+    
+    res.json({
+      ok: true,
+      version: VERSION,
+      login_status: loginRes.status,
+      login_response_keys: Object.keys(loginRes.data || {}),
+      login_data_keys: loginRes.data && loginRes.data.data ? Object.keys(loginRes.data.data).slice(0, 20) : null,
+      login_data_preview: loginRes.data && loginRes.data.data ? JSON.stringify(loginRes.data.data).substring(0, 500) : null,
+      login_scopeData_keys: loginRes.data && loginRes.data.scopeData ? Object.keys(loginRes.data.scopeData).slice(0, 20) : null,
+      login_status_field: loginRes.data ? loginRes.data.status : null,
+      login_version: loginRes.data ? loginRes.data.version : null,
+      cookies_count: cookies.length,
+      cookies_raw: cookies.map(c => c.substring(0, 100)),
+      all_cookies_string: allCookies.substring(0, 200),
+      phpsessid: phpsessid ? phpsessid.substring(0, 10) + '...' : null,
+      test_solo_phpsessid: testResult,
+      test_todas_cookies: testResult2,
+      test_preview: testPreview,
+    });
+  } catch(e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ===========================================================
 // RAW IGMS: diagnostico crudo de la API de IGMS
 // GET /igms/raw — muestra exactamente que devuelve IGMS
 // ===========================================================
