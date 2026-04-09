@@ -128,6 +128,8 @@ SANTA BARBARA 205: Calle 124 21-10 Edif Toledo
 COUNTRY 310: Edif LECCO, Calle 134c 12b-91, Apto 310. Parqueadero solo moto. Estadias +30 dias: $35.000 mensual.
 RODADERO 401 (Santa Marta): Calle 17 2-63, Edif Manzanares. Check-in hasta 10pm presencial. Encargada: Yurani.
 SANTA MARINA 1410: Torre 2, Apto 1410, Conj Santa Marina, sector Don Jaca. Manillas: $29.200/persona.
+Desayuno incluido SOLO para reservas de 7 noches o mas (leche, cafe, azucar, aceite, jugo naranja, pan, queso, jamon, huevos).
+Para reservas menores a 7 noches NO incluye desayuno.
 TAYRONA: KM 37 Troncal | 4pm/11am | Wilfer: +57 321 7652591
 PALOMINO: Parcelacion Ukua Casa C1 | piscina+playa privada
 CURITÌ CASTILLO: 7 cabanas, banos compartidos, sin desayuno, sin nevera en cabanas.
@@ -346,12 +348,12 @@ async function polling() {
     const phpsessid = await getSesion();
     if (!phpsessid) { console.log('[Poll] Sin sesion IGMS'); return; }
     const res = await axios.get(
-      'https://www.igms.com/api/data/threads?filters[limit]=20&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
+      'https://www.igms.com/api/data/threads?filters[limit]=50&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
       { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
     );
     const threadIds = res.data && res.data.data && res.data.data.thread_ids ? res.data.data.thread_ids : [];
     console.log('[Poll] ' + (threadIds.length > 0 ? threadIds.length + ' threads encontrados' : 'sin mensajes nuevos'));
-    for (const threadId of threadIds.slice(0, 5)) {
+    for (const threadId of threadIds.slice(0, 20)) {
       await procesarThread(threadId, phpsessid);
       await new Promise(r => setTimeout(r, 1500));
     }
