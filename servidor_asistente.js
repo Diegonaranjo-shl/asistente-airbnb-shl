@@ -19,7 +19,7 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 
-const VERSION = '5.5';
+const VERSION = '5.6';
 
 const CONFIG = {
   ANTHROPIC_API_KEY:    process.env.ANTHROPIC_API_KEY,
@@ -39,7 +39,7 @@ const CONFIG = {
 // ===========================================================
 // SESION IGMS
 // ===========================================================
-let sesion = { phpsessid: null, expira: 0 };
+let sesion = { phpsessid: null, allCookies: null, expira: 0 };
 let socket = null;
 let socketConectado = false;
 let reconectando = false;
@@ -240,70 +240,57 @@ async function loginIGMS() {
       { email: CONFIG.IGMS_EMAIL, password: CONFIG.IGMS_PASSWORD, platform: 'web' },
       { headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' }, maxRedirects: 5 }
     );
-    console.log('[IGMS] Login status:', res.status, '| response type:', typeof res.data);
-    console.log('[IGMS] Login response keys:', typeof res.data === 'object' ? Object.keys(res.data) : 'no-object');
     
-    // Log ALL cookies
-    const cookies = res.headers['set-cookie'] || [];
-    console.log('[IGMS] Todas las cookies (' + cookies.length + '):');
-    cookies.forEach((c, i) => console.log('[IGMS]   cookie[' + i + ']:', c.substring(0, 120)));
+    // Verificar que el login fue exitoso
+    const loginErr = res.data && res.data.data && res.data.data.err;
+    const loginMsg = res.data && res.data.data && res.data.data.data && res.data.data.data.message;
+    console.log('[IGMS] Login response: err=' + loginErr + ', msg=' + loginMsg);
     
-    // Log status/data from login response
-    if (res.data && res.data.status) console.log('[IGMS] Login response status:', res.data.status);
-    if (res.data && res.data.data) console.log('[IGMS] Login data keys:', Object.keys(res.data.data).slice(0, 15));
-    
-    // Capturar TODAS las cookies, no solo PHPSESSID
-    const allCookies = cookies.map(c => c.split(';')[0]).join('; ');
-    console.log('[IGMS] Cookie string completa:', allCookies.substring(0, 200));
-    
-    const phpCookie = cookies.find(c => c.includes('PHPSESSID'));
-    if (phpCookie) {
-      const match = phpCookie.match(/PHPSESSID=([^;]+)/);
-      if (match) {
-        sesion.phpsessid = match[1];
-        sesion.allCookies = allCookies; // Guardar TODAS las cookies
-        sesion.expira = Date.now() + 22 * 60 * 60 * 1000;
-        console.log('[IGMS] PHPSESSID: ' + match[1].substring(0, 8) + '...');
-        
-        // Validar: probar con SOLO phpsessid vs TODAS las cookies
-        try {
-          // Test 1: solo PHPSESSID
-          const test1 = await axios.get(
-            'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
-            { headers: { Cookie: 'PHPSESSID=' + sesion.phpsessid, 'User-Agent': 'Mozilla/5.0' }, responseType: 'text' }
-          );
-          const esHtml1 = typeof test1.data === 'string' && test1.data.trim().startsWith('<');
-          console.log('[IGMS] Test solo PHPSESSID:', esHtml1 ? 'FALLO (HTML)' : 'OK (JSON)');
-          
-          // Test 2: TODAS las cookies
-          const test2 = await axios.get(
-            'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
-            { headers: { Cookie: allCookies, 'User-Agent': 'Mozilla/5.0' }, responseType: 'text' }
-          );
-          const esHtml2 = typeof test2.data === 'string' && test2.data.trim().startsWith('<');
-          console.log('[IGMS] Test TODAS las cookies:', esHtml2 ? 'FALLO (HTML)' : 'OK (JSON)');
-          
-          if (!esHtml2 && esHtml1) {
-            console.log('[IGMS] *** NECESITA TODAS LAS COOKIES, no solo PHPSESSID ***');
-          }
-          if (esHtml1 && esHtml2) {
-            console.error('[IGMS] Ambos tests fallan — sesion no valida');
-            sesion.phpsessid = null;
-            sesion.expira = 0;
-            return false;
-          }
-        } catch(e) {
-          console.error('[IGMS] Error validando:', e.message);
-        }
-        return true;
-      }
+    if (loginErr !== false) {
+      console.error('[IGMS] Login RECHAZADO:', loginMsg || 'error desconocido');
+      return false;
     }
     
-    console.error('[IGMS] No se encontro PHPSESSID en cookies');
-    return false;
+    // Capturar TODAS las cookies
+    const cookies = res.headers['set-cookie'] || [];
+    const allCookies = cookies.map(c => c.split(';')[0]).join('; ');
+    console.log('[IGMS] Cookies recibidas (' + cookies.length + '):', allCookies.substring(0, 150));
+    
+    if (!allCookies) {
+      console.error('[IGMS] No se recibieron cookies');
+      return false;
+    }
+    
+    // Guardar todas las cookies (IGMS puede usar PHPSESSID o wsb-user-uid)
+    sesion.allCookies = allCookies;
+    sesion.expira = Date.now() + 22 * 60 * 60 * 1000;
+    
+    // Extraer PHPSESSID si existe (compatibilidad)
+    const phpMatch = allCookies.match(/PHPSESSID=([^;]+)/);
+    sesion.phpsessid = phpMatch ? phpMatch[1] : 'using-wsb-cookie';
+    
+    // Validar que la sesion funciona
+    try {
+      const testRes = await axios.get(
+        'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
+        { headers: { Cookie: allCookies, 'User-Agent': 'Mozilla/5.0' }, responseType: 'text' }
+      );
+      const esHtml = typeof testRes.data === 'string' && testRes.data.trim().startsWith('<');
+      if (esHtml) {
+        console.error('[IGMS] Sesion NO valida - API devuelve HTML');
+        sesion.phpsessid = null;
+        sesion.allCookies = null;
+        sesion.expira = 0;
+        return false;
+      }
+      console.log('[IGMS] Sesion VALIDADA OK - API devuelve JSON');
+    } catch(e) {
+      console.error('[IGMS] Error validando sesion:', e.message);
+    }
+    
+    return true;
   } catch(e) {
     console.error('[IGMS] Login error:', e.message);
-    if (e.response) console.error('[IGMS] Status:', e.response.status, 'Data:', JSON.stringify(e.response.data).substring(0, 200));
     return false;
   }
 }
