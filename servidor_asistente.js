@@ -163,8 +163,9 @@ Taxi desde aeropuerto Santa Marta hasta apto 401: $30.000 COP.
 SANTA MARINA 1410: Torre 2, Apto 1410, Conj Santa Marina, sector Don Jaca. Manillas: $29.200/persona.
 Taxi desde aeropuerto Santa Marta hasta apto 1410: $30.000 COP.
 Mantenimiento de piscinas: los dias MARTES. Parqueadero auto y moto GRATIS.
-Desayuno incluido SOLO para reservas de 7 noches o mas (leche, cafe, azucar, aceite, jugo naranja, pan, queso, jamon, huevos).
-Para reservas menores a 7 noches NO incluye desayuno.
+Desayuno incluido SOLO para reservas de 7 noches o mas en SANTA MARINA 1410 (leche, cafe, azucar, aceite, jugo naranja, pan, queso, jamon, huevos).
+Para reservas menores a 7 noches en 1410 NO incluye desayuno.
+IMPORTANTE: NINGUNA otra propiedad incluye desayuno. Solo el 1410. Si preguntan por desayuno en cualquier otro apartamento, responder: "Este apartamento no incluye desayuno."
 TAYRONA: KM 37 Troncal | 4pm/11am | Wilfer: +57 321 7652591
 Google Maps: Beach Suites Tayrona (asi se busca para llegar).
 Ubicacion en la playa, ideal para descansar y desconectarse.
