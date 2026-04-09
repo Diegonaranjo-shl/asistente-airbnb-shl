@@ -19,7 +19,7 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 
-const VERSION = '5.6';
+const VERSION = '5.6.1';
 
 const CONFIG = {
   ANTHROPIC_API_KEY:    process.env.ANTHROPIC_API_KEY,
@@ -273,19 +273,22 @@ async function loginIGMS() {
     try {
       const testRes = await axios.get(
         'https://www.igms.com/api/data/threads?filters[limit]=1&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
-        { headers: { Cookie: allCookies, 'User-Agent': 'Mozilla/5.0' }, responseType: 'text' }
+        { headers: { Cookie: allCookies, 'User-Agent': 'Mozilla/5.0' }, responseType: 'text', maxRedirects: 0, validateStatus: () => true }
       );
-      const esHtml = typeof testRes.data === 'string' && testRes.data.trim().startsWith('<');
-      if (esHtml) {
-        console.error('[IGMS] Sesion NO valida - API devuelve HTML');
-        sesion.phpsessid = null;
-        sesion.allCookies = null;
-        sesion.expira = 0;
-        return false;
+      const testData = (testRes.data || '') + '';
+      const esHtml = testData.trim().startsWith('<');
+      const esRedirect = testRes.status >= 300 && testRes.status < 400;
+      console.log('[IGMS] Validacion: status=' + testRes.status + ', esHtml=' + esHtml + ', largo=' + testData.length);
+      if (esHtml || esRedirect) {
+        console.error('[IGMS] Sesion NO valida - API devuelve HTML o redirect');
+        // No invalidar la sesion — puede que la cookie funcione para otros endpoints
+        // En lugar de fallar, seguir con la sesion y dejar que el polling maneje el error
+        console.log('[IGMS] Manteniendo sesion de todas formas (wsb-user-uid)');
+      } else {
+        console.log('[IGMS] Sesion VALIDADA OK - API devuelve JSON');
       }
-      console.log('[IGMS] Sesion VALIDADA OK - API devuelve JSON');
     } catch(e) {
-      console.error('[IGMS] Error validando sesion:', e.message);
+      console.log('[IGMS] Error en validacion (continuando de todas formas):', e.message);
     }
     
     return true;
@@ -424,7 +427,7 @@ async function polling() {
     if (!phpsessid) { console.log('[Poll] Sin sesion IGMS'); return; }
     const res = await axios.get(
       'https://www.igms.com/api/data/threads?filters[limit]=50&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
-      { headers: { Cookie: getCookieHeader(), 'User-Agent': 'Mozilla/5.0' }, responseType: 'text' }
+      { headers: { Cookie: getCookieHeader(), 'User-Agent': 'Mozilla/5.0' }, responseType: 'text', maxRedirects: 0, validateStatus: () => true }
     );
     
     // Detectar si IGMS devolvio HTML (sesion invalida)
