@@ -122,8 +122,9 @@ Check-in: 3pm TODAS las propiedades | Check-out: 11am lofts | 12pm fam/PH
 Late checkout 2pm: $50.000 COP (sujeto disponibilidad)
 Codigos caja: 101->2850|201->1607|202->0190|301->3676|302->9244|303->2713|304->9094|305->5961
 306->6457|401->8219|402->3253|403->9733|404->9034|405->1357|406->1486|501->2080
-Parqueadero: GRATIS para estadias cortas. Solo para MOTO (no hay para carro).
-Estadias mas de 30 dias: $35.000 COP MENSUAL.
+Parqueadero BLACKLIVING: GRATIS para estadias cortas. Solo para MOTO (no hay para carro).
+Estadias mas de 30 dias en BLACKLIVING: $35.000 COP MENSUAL.
+NOTA: esta politica de parqueadero aplica SOLAMENTE para el edificio BlackLiving.
 Edificio con ascensor | Lavanderia $7.000/turno piso5 (8-11am o 3-7pm, Nequi 3107541755 Maritza Mora)
 Domicilios: CRA 73BIS 64A-67 + num apto (no ubicacion del mapa)
 Agua Bogota: potable. Cafe: Sello Rojo.
@@ -135,10 +136,11 @@ PH 501: terraza privada | hab principal cama queen + bano privado con jacuzzi | 
 
 LA 33-805: Cra 7 33-91 Edif Teleskop (estadias largas)
 CANDELARIA 1210: Calle 18 3-18 Edif Ventto | caja: 9539
-SANTA BARBARA 205: Calle 124 21-10 Edif Toledo
-COUNTRY 310: Edif LECCO, Calle 134c 12b-91, Apto 310. Parqueadero solo moto. Estadias +30 dias: $35.000 mensual.
+SANTA BARBARA 205: Calle 124 21-10 Edif Toledo. Parqueadero disponible GRATIS.
+COUNTRY 310: Edif LECCO, Calle 134c 12b-91, Apto 310. Consultar parqueadero.
 RODADERO 401 (Santa Marta): Calle 17 2-63, Edif Manzanares. Check-in hasta 10pm presencial. Encargada: Yurani.
 SANTA MARINA 1410: Torre 2, Apto 1410, Conj Santa Marina, sector Don Jaca. Manillas: $29.200/persona.
+Mantenimiento de piscinas: los dias MARTES.
 Desayuno incluido SOLO para reservas de 7 noches o mas (leche, cafe, azucar, aceite, jugo naranja, pan, queso, jamon, huevos).
 Para reservas menores a 7 noches NO incluye desayuno.
 TAYRONA: KM 37 Troncal | 4pm/11am | Wilfer: +57 321 7652591
