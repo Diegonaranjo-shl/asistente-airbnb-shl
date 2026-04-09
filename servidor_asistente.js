@@ -846,6 +846,13 @@ async function polling() {
   }
 }
 
+// Cola de mensajes pendientes de respuesta IA (fase 2)
+// { threadId, msgId, nombre, propiedad, mensaje, timestampFase1 }
+const pendientesFase2 = [];
+
+const MENSAJE_FASE1 = 'Gracias por escribirnos, vamos a coordinar con alguien del equipo para que pueda ayudarte con tu consulta. Con mucho gusto te asistiremos.';
+const DELAY_FASE2 = 20 * 60 * 1000; // 20 minutos
+
 async function procesarThread(threadId) {
   try {
     const res = await axios.get(
@@ -862,8 +869,6 @@ async function procesarThread(threadId) {
     const msgId = ultimo.id;
     if (!msgId || respondidos.has(msgId)) return;
     
-    // Detectar si es del huesped: sender_id != host_id
-    // En algunos inquiries host_id puede estar vacio, asi que tambien verificamos sender_type
     const esHost = (ultimo.sender_id && ultimo.host_id && ultimo.sender_id === ultimo.host_id) ||
                    (ultimo.sender_type === 'host') ||
                    (ultimo.sent_by_host === true || ultimo.sent_by_host === 1);
@@ -877,23 +882,88 @@ async function procesarThread(threadId) {
     const propiedad = reserva.listing_name || data.listing_name || 'Propiedad SuperHost Loft';
     const nombre = reserva.guest_name || data.guest_name || 'Huesped';
 
-    console.log('[Poll] Msg de ' + nombre + ' [' + propiedad.substring(0, 30) + ']: "' + mensaje.substring(0, 60) + '"');
+    console.log('[Fase1] Msg de ' + nombre + ' [' + propiedad.substring(0, 30) + ']: "' + mensaje.substring(0, 60) + '"');
     respondidos.add(msgId);
-    if (respondidos.size > 1000) {
-      // Limpiar los mas viejos
-      const iter = respondidos.values();
-      for (let i = 0; i < 200; i++) iter.next();
-      respondidos.delete(respondidos.values().next().value);
+    if (respondidos.size > 1000) respondidos.delete(respondidos.values().next().value);
+
+    // FASE 1: Enviar mensaje de cortesía inmediato
+    const enviadoF1 = await enviarMensaje(threadId, MENSAJE_FASE1);
+    if (enviadoF1) {
+      console.log('[Fase1] Cortesía enviada a ' + nombre);
+    } else {
+      console.log('[Fase1] FALLO envío cortesía a ' + nombre);
     }
 
-    const respuesta = await generarRespuesta(mensaje, nombre, propiedad);
-    const enviado = await enviarMensaje(threadId, respuesta);
-    if (enviado) console.log('[Poll] Respondido a ' + nombre);
-    else console.log('[Poll] FALLO envio a ' + nombre);
+    // Programar FASE 2: respuesta IA después de 20 minutos
+    pendientesFase2.push({
+      threadId, msgId, nombre, propiedad, mensaje,
+      timestampFase1: Date.now(),
+    });
+    console.log('[Fase2] Programada respuesta IA para ' + nombre + ' en 20 min (' + pendientesFase2.length + ' en cola)');
+
   } catch(e) {
     console.error('[Poll] Error en thread ' + threadId + ':', e.message);
   }
 }
+
+// Verificar cola de fase 2 cada 60 segundos
+setInterval(async () => {
+  if (!pendientesFase2.length) return;
+  const ahora = Date.now();
+  
+  // Procesar los que ya pasaron 20 minutos
+  const listos = [];
+  const pendientes = [];
+  for (const p of pendientesFase2) {
+    if (ahora - p.timestampFase1 >= DELAY_FASE2) {
+      listos.push(p);
+    } else {
+      pendientes.push(p);
+    }
+  }
+  pendientesFase2.length = 0;
+  pendientes.forEach(p => pendientesFase2.push(p));
+  
+  for (const p of listos) {
+    try {
+      // Verificar si el equipo humano ya respondió
+      const res = await axios.get(
+        'https://www.igms.com/api/data/thread-page-data?params[thread_id]=' + p.threadId +
+        '&params[platform_type]=airbnb&params[owner_user_id]=' + CONFIG.IGMS_CLIENT_ID,
+        { headers: getApiHeaders() }
+      );
+      const scope = (res.data && res.data.scopeData) || {};
+      const mensajes = scope.Message && scope.Message.data ? Object.values(scope.Message.data) : [];
+      mensajes.sort((a, b) => (a.dttm || '').localeCompare(b.dttm || ''));
+      
+      // Buscar si hay un mensaje del host POSTERIOR a la fase 1 (que no sea el mensaje de cortesía)
+      const mensajesPostFase1 = mensajes.filter(m => {
+        const esPosterior = new Date(m.dttm).getTime() > p.timestampFase1 - 5000;
+        const esDelHost = (m.sender_id && m.host_id && m.sender_id === m.host_id) ||
+                          (m.sender_type === 'host') ||
+                          (m.sent_by_host === true || m.sent_by_host === 1);
+        const noEsCortesia = (m.message_text || '') !== MENSAJE_FASE1;
+        return esPosterior && esDelHost && noEsCortesia;
+      });
+      
+      if (mensajesPostFase1.length > 0) {
+        console.log('[Fase2] Equipo humano ya respondió a ' + p.nombre + ' — omitiendo respuesta IA');
+        continue;
+      }
+      
+      // Equipo humano NO respondió — generar y enviar respuesta IA
+      console.log('[Fase2] Sin respuesta humana para ' + p.nombre + ' — generando respuesta IA...');
+      const respuesta = await generarRespuesta(p.mensaje, p.nombre, p.propiedad);
+      const enviado = await enviarMensaje(p.threadId, respuesta);
+      if (enviado) console.log('[Fase2] Respuesta IA enviada a ' + p.nombre);
+      else console.log('[Fase2] FALLO envío IA a ' + p.nombre);
+      
+    } catch(e) {
+      console.error('[Fase2] Error procesando ' + p.nombre + ':', e.message);
+    }
+    await new Promise(r => setTimeout(r, 2000));
+  }
+}, 60 * 1000); // Revisar cada minuto
 
 async function procesarMensajeSocket(data) {
   const msgId = data.event_id || data.id || (data.thread_id + '_' + Date.now());
@@ -903,7 +973,7 @@ async function procesarMensajeSocket(data) {
   const threadId = data.thread_id || data.threadId;
   if (!mensaje || !threadId || esHost) return;
   respondidos.add(msgId);
-  if (respondidos.size > 500) respondidos.delete(respondidos.values().next().value);
+  if (respondidos.size > 1000) respondidos.delete(respondidos.values().next().value);
   const nombre = data.guest_name || data.author || 'Huesped';
   const propiedad = data.listing_name || 'Propiedad SHL';
   const ok = await asegurarSesion();
@@ -911,8 +981,17 @@ async function procesarMensajeSocket(data) {
   if ((data.event_type === 'reservation_confirmed' || data.reservation_status === 'accepted') && data.checkin_date) {
     await programarCheckin(threadId, nombre, propiedad, data.checkin_date);
   }
-  const respuesta = await generarRespuesta(mensaje, nombre, propiedad);
-  await enviarMensaje(threadId, respuesta);
+  
+  // FASE 1: Enviar mensaje de cortesía inmediato
+  const enviadoF1 = await enviarMensaje(threadId, MENSAJE_FASE1);
+  if (enviadoF1) console.log('[Socket-Fase1] Cortesía enviada a ' + nombre);
+  
+  // Programar FASE 2
+  pendientesFase2.push({
+    threadId, msgId, nombre, propiedad, mensaje,
+    timestampFase1: Date.now(),
+  });
+  console.log('[Socket-Fase2] Programada respuesta IA para ' + nombre + ' en 20 min');
 }
 
 // ===========================================================
@@ -981,6 +1060,7 @@ app.get('/health', (req, res) => {
     polling: sesion.threadsOk ? 'activo cada 30s' : 'desactivado (sin acceso threads)',
     websocket_mode: !sesion.threadsOk ? 'PRINCIPAL (REST no disponible)' : 'complementario',
     respondidos: respondidos.size,
+    fase2_pendientes: pendientesFase2.length,
     timestamp: new Date().toISOString(),
   });
 });
