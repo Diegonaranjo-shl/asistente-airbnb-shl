@@ -585,9 +585,13 @@ async function conectarSocket() {
   ];
   for (const evt of eventosIGMS) {
     socket.on(evt, async (data) => {
-      console.log('[Socket] Evento "' + evt + '":', JSON.stringify(data).substring(0, 200));
-      if (typeof data === 'object' && (data.thread_id || data.threadId || data.message || data.text)) {
-        await procesarMensajeSocket(data);
+      try {
+        console.log('[Socket] Evento "' + evt + '":', (JSON.stringify(data) || 'undefined').substring(0, 200));
+        if (data && typeof data === 'object' && (data.thread_id || data.threadId || data.message || data.text)) {
+          await procesarMensajeSocket(data);
+        }
+      } catch(e) {
+        console.log('[Socket] Error procesando evento "' + evt + '":', e.message);
       }
     });
   }
@@ -595,9 +599,12 @@ async function conectarSocket() {
   // Capturar eventos no listados via el emit original (compatible con v2)
   const _origEmit = socket.emit.bind(socket);
   socket.emit = function(event, ...args) {
-    if (!eventosIGMS.includes(event) && !['connect','disconnect','connect_error','reconnect'].includes(event)) {
-      console.log('[Socket] Evento NO listado "' + event + '":', JSON.stringify(args[0]).substring(0, 150));
-    }
+    try {
+      if (!eventosIGMS.includes(event) && !['connect','disconnect','connect_error','reconnect','ping','pong'].includes(event)) {
+        const preview = args[0] !== undefined ? (JSON.stringify(args[0]) || '').substring(0, 150) : '(sin datos)';
+        console.log('[Socket] Evento NO listado "' + event + '":', preview);
+      }
+    } catch(e) { /* ignorar errores de log */ }
     return _origEmit(event, ...args);
   };
 }
