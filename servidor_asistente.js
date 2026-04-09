@@ -19,7 +19,7 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 
-const VERSION = '5.4.1';
+const VERSION = '5.5';
 
 const CONFIG = {
   ANTHROPIC_API_KEY:    process.env.ANTHROPIC_API_KEY,
@@ -342,6 +342,37 @@ async function conectarSocket() {
 }
 
 // ===========================================================
+// HELPER: extraer thread IDs de la respuesta de IGMS
+// IGMS puede devolver: array directo, { data: { thread_ids } }, u objeto indexado
+// ===========================================================
+function extraerThreadIds(responseData) {
+  // Caso 1: respuesta es un array directo de objetos con thread_id
+  if (Array.isArray(responseData)) {
+    return responseData
+      .map(item => item.thread_id || item.id || item)
+      .filter(id => id && typeof id !== 'object')
+      .slice(0, 50);
+  }
+  // Caso 2: { data: { thread_ids: [...] } } (formato original documentado)
+  if (responseData && responseData.data && responseData.data.thread_ids) {
+    return responseData.data.thread_ids;
+  }
+  // Caso 3: objeto con keys numericas (array-like) — ej: {"0": {...}, "1": {...}, ...}
+  if (responseData && typeof responseData === 'object') {
+    const keys = Object.keys(responseData);
+    const esArrayLike = keys.length > 0 && keys.every(k => /^\d+$/.test(k));
+    if (esArrayLike) {
+      const items = keys.sort((a,b) => parseInt(a) - parseInt(b)).map(k => responseData[k]);
+      return items
+        .map(item => item.thread_id || item.id || item)
+        .filter(id => id && typeof id !== 'object')
+        .slice(0, 50);
+    }
+  }
+  return [];
+}
+
+// ===========================================================
 // POLLING cada 30 segundos
 // ===========================================================
 async function polling() {
@@ -352,7 +383,7 @@ async function polling() {
       'https://www.igms.com/api/data/threads?filters[limit]=50&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
       { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
     );
-    const threadIds = res.data && res.data.data && res.data.data.thread_ids ? res.data.data.thread_ids : [];
+    const threadIds = extraerThreadIds(res.data);
     console.log('[Poll] ' + (threadIds.length > 0 ? threadIds.length + ' threads encontrados' : 'sin mensajes nuevos'));
     for (const threadId of threadIds.slice(0, 20)) {
       await procesarThread(threadId, phpsessid);
@@ -493,7 +524,6 @@ app.get('/igms/raw', async (req, res) => {
     const phpsessid = await getSesion();
     if (!phpsessid) return res.json({ ok: false, error: 'Sin sesion IGMS', sesion });
 
-    // Paso 1: traer threads
     const url = 'https://www.igms.com/api/data/threads?filters[limit]=50&filters[cursor]=0&filters[initial_load]=1&filters[category]=all';
     const threadsRes = await axios.get(url, {
       headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' }
@@ -501,7 +531,23 @@ app.get('/igms/raw', async (req, res) => {
 
     const status = threadsRes.status;
     const rawData = threadsRes.data;
-    const threadIds = (rawData && rawData.data && rawData.data.thread_ids) || [];
+    const isArray = Array.isArray(rawData);
+    const keys = rawData ? Object.keys(rawData) : [];
+
+    // Muestra de los primeros 3 items crudos (truncados)
+    const muestra = [];
+    for (let i = 0; i < Math.min(3, keys.length); i++) {
+      const item = rawData[keys[i]];
+      muestra.push({
+        key: keys[i],
+        type: typeof item,
+        keys_del_item: typeof item === 'object' && item ? Object.keys(item).slice(0, 15) : null,
+        preview: JSON.stringify(item).substring(0, 300),
+      });
+    }
+
+    // Usar el nuevo helper
+    const threadIds = extraerThreadIds(rawData);
 
     // Si hay threads, traer el primero como ejemplo
     let ejemploThread = null;
@@ -512,7 +558,6 @@ app.get('/igms/raw', async (req, res) => {
           '&params[platform_type]=airbnb&params[owner_user_id]=' + CONFIG.IGMS_CLIENT_ID,
           { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
         );
-        // Mostrar las keys del scopeData para entender la estructura
         const scope = (tRes.data && tRes.data.scopeData) || {};
         ejemploThread = {
           thread_id: threadIds[0],
@@ -531,11 +576,11 @@ app.get('/igms/raw', async (req, res) => {
       ok: true,
       version: VERSION,
       sesion_activa: !!phpsessid,
-      phpsessid_preview: phpsessid ? phpsessid.substring(0, 8) + '...' : null,
       threads_http_status: status,
-      threads_response_keys: rawData ? Object.keys(rawData) : [],
-      threads_data_keys: rawData && rawData.data ? Object.keys(rawData.data) : [],
-      thread_ids_count: threadIds.length,
+      response_is_array: isArray,
+      response_total_keys: keys.length,
+      muestra_items_crudos: muestra,
+      thread_ids_extraidos: threadIds.length,
       thread_ids_muestra: threadIds.slice(0, 5),
       ejemplo_thread: ejemploThread,
     });
@@ -563,7 +608,7 @@ app.get('/poll/debug', async (req, res) => {
       'https://www.igms.com/api/data/threads?filters[limit]=50&filters[cursor]=0&filters[initial_load]=1&filters[category]=all',
       { headers: { Cookie: 'PHPSESSID=' + phpsessid, 'User-Agent': 'Mozilla/5.0' } }
     );
-    const threadIds = (threadsRes.data && threadsRes.data.data && threadsRes.data.data.thread_ids) || [];
+    const threadIds = extraerThreadIds(threadsRes.data);
 
     const resultados = [];
     for (const threadId of threadIds.slice(0, limite)) {
