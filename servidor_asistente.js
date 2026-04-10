@@ -21,7 +21,7 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 
-const VERSION = '5.8.0';
+const VERSION = '5.8.1';
 
 const CONFIG = {
   ANTHROPIC_API_KEY:    process.env.ANTHROPIC_API_KEY,
@@ -55,6 +55,7 @@ let socket = null;
 let socketConectado = false;
 let reconectando = false;
 const respondidos = new Set();
+const fase1Enviada = new Set(); // Tracks threadIds que ya recibieron mensaje de cortesía
 
 // ===========================================================
 // TTLOCK
@@ -882,24 +883,40 @@ async function procesarThread(threadId) {
     const propiedad = reserva.listing_name || data.listing_name || 'Propiedad SuperHost Loft';
     const nombre = reserva.guest_name || data.guest_name || 'Huesped';
 
-    console.log('[Fase1] Msg de ' + nombre + ' [' + propiedad.substring(0, 30) + ']: "' + mensaje.substring(0, 60) + '"');
+    console.log('[Poll] Msg de ' + nombre + ' [' + propiedad.substring(0, 30) + ']: "' + mensaje.substring(0, 60) + '"');
     respondidos.add(msgId);
     if (respondidos.size > 1000) respondidos.delete(respondidos.values().next().value);
 
-    // FASE 1: Enviar mensaje de cortesía inmediato
-    const enviadoF1 = await enviarMensaje(threadId, MENSAJE_FASE1);
-    if (enviadoF1) {
-      console.log('[Fase1] Cortesía enviada a ' + nombre);
+    // FASE 1: Enviar mensaje de cortesía — SOLO UNA VEZ por conversación
+    if (!fase1Enviada.has(threadId)) {
+      const enviadoF1 = await enviarMensaje(threadId, MENSAJE_FASE1);
+      if (enviadoF1) {
+        fase1Enviada.add(threadId);
+        if (fase1Enviada.size > 500) fase1Enviada.delete(fase1Enviada.values().next().value);
+        console.log('[Fase1] Cortesía enviada a ' + nombre + ' (thread ' + threadId + ')');
+      } else {
+        console.log('[Fase1] FALLO envío cortesía a ' + nombre);
+      }
     } else {
-      console.log('[Fase1] FALLO envío cortesía a ' + nombre);
+      console.log('[Fase1] Cortesía YA enviada a thread ' + threadId + ' — omitiendo');
     }
 
-    // Programar FASE 2: respuesta IA después de 20 minutos
-    pendientesFase2.push({
-      threadId, msgId, nombre, propiedad, mensaje,
-      timestampFase1: Date.now(),
-    });
-    console.log('[Fase2] Programada respuesta IA para ' + nombre + ' en 20 min (' + pendientesFase2.length + ' en cola)');
+    // FASE 2: Si ya hay un pendiente para este thread, actualizar el mensaje (el último del huésped)
+    const pendienteExistente = pendientesFase2.find(p => p.threadId === threadId);
+    if (pendienteExistente) {
+      // Actualizar con el mensaje más reciente y resetear timer
+      pendienteExistente.mensaje = mensaje;
+      pendienteExistente.msgId = msgId;
+      pendienteExistente.timestampFase1 = Date.now();
+      console.log('[Fase2] Actualizado mensaje pendiente para ' + nombre + ' — timer reiniciado a 20 min');
+    } else {
+      // Nuevo pendiente
+      pendientesFase2.push({
+        threadId, msgId, nombre, propiedad, mensaje,
+        timestampFase1: Date.now(),
+      });
+      console.log('[Fase2] Programada respuesta IA para ' + nombre + ' en 20 min (' + pendientesFase2.length + ' en cola)');
+    }
 
   } catch(e) {
     console.error('[Poll] Error en thread ' + threadId + ':', e.message);
@@ -982,16 +999,32 @@ async function procesarMensajeSocket(data) {
     await programarCheckin(threadId, nombre, propiedad, data.checkin_date);
   }
   
-  // FASE 1: Enviar mensaje de cortesía inmediato
-  const enviadoF1 = await enviarMensaje(threadId, MENSAJE_FASE1);
-  if (enviadoF1) console.log('[Socket-Fase1] Cortesía enviada a ' + nombre);
+  // FASE 1: Enviar mensaje de cortesía — SOLO UNA VEZ por conversación
+  if (!fase1Enviada.has(threadId)) {
+    const enviadoF1 = await enviarMensaje(threadId, MENSAJE_FASE1);
+    if (enviadoF1) {
+      fase1Enviada.add(threadId);
+      if (fase1Enviada.size > 500) fase1Enviada.delete(fase1Enviada.values().next().value);
+      console.log('[Socket-Fase1] Cortesía enviada a ' + nombre + ' (thread ' + threadId + ')');
+    }
+  } else {
+    console.log('[Socket-Fase1] Cortesía YA enviada a thread ' + threadId + ' — omitiendo');
+  }
   
-  // Programar FASE 2
-  pendientesFase2.push({
-    threadId, msgId, nombre, propiedad, mensaje,
-    timestampFase1: Date.now(),
-  });
-  console.log('[Socket-Fase2] Programada respuesta IA para ' + nombre + ' en 20 min');
+  // FASE 2: Actualizar o crear pendiente
+  const pendienteExistente = pendientesFase2.find(p => p.threadId === threadId);
+  if (pendienteExistente) {
+    pendienteExistente.mensaje = mensaje;
+    pendienteExistente.msgId = msgId;
+    pendienteExistente.timestampFase1 = Date.now();
+    console.log('[Socket-Fase2] Actualizado pendiente para ' + nombre + ' — timer reiniciado');
+  } else {
+    pendientesFase2.push({
+      threadId, msgId, nombre, propiedad, mensaje,
+      timestampFase1: Date.now(),
+    });
+    console.log('[Socket-Fase2] Programada respuesta IA para ' + nombre + ' en 20 min');
+  }
 }
 
 // ===========================================================
