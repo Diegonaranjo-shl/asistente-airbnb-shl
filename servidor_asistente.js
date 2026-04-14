@@ -21,7 +21,7 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 
-const VERSION = '5.8.1';
+const VERSION = '5.8.2';
 
 const CONFIG = {
   ANTHROPIC_API_KEY:    process.env.ANTHROPIC_API_KEY,
@@ -870,16 +870,29 @@ async function procesarThread(threadId) {
     const msgId = ultimo.id;
     if (!msgId || respondidos.has(msgId)) return;
     
-    const esHost = (ultimo.sender_id && ultimo.host_id && ultimo.sender_id === ultimo.host_id) ||
-                   (ultimo.sender_type === 'host') ||
-                   (ultimo.sent_by_host === true || ultimo.sent_by_host === 1);
-    const mensaje = ultimo.message_text || ultimo.message || ultimo.text || '';
-    if (esHost || !mensaje || mensaje.length < 2) return;
-
+    // DETECCIÓN ROBUSTA: identificar si el mensaje es del HUÉSPED
+    // En IGMS, los coanfitriones tienen sender_id diferente al host_id,
+    // así que comparar sender_id === host_id NO detecta coanfitriones.
+    // Solución: verificar que el sender ES el huésped de la reserva.
     const reservas = (scope.Reservation && scope.Reservation.data) || {};
     const resKey = Object.keys(reservas)[0];
     const reserva = reservas[resKey] || {};
     const data = (res.data && res.data.data) || {};
+    const guestId = reserva.guest_id || data.guest_id || null;
+    
+    const esHost = (ultimo.sender_id && ultimo.host_id && ultimo.sender_id === ultimo.host_id) ||
+                   (ultimo.sender_type === 'host') ||
+                   (ultimo.sent_by_host === true || ultimo.sent_by_host === 1);
+    
+    // Si hay guest_id disponible, verificar que el sender ES el huésped
+    // Si el sender NO es el huésped, es alguien del equipo (host o coanfitrión)
+    const esHuesped = guestId
+      ? (String(ultimo.sender_id) === String(guestId))
+      : !esHost; // fallback a detección anterior si no hay guest_id
+    
+    const mensaje = ultimo.message_text || ultimo.message || ultimo.text || '';
+    if (!esHuesped || !mensaje || mensaje.length < 2) return;
+
     const propiedad = reserva.listing_name || data.listing_name || 'Propiedad SuperHost Loft';
     const nombre = reserva.guest_name || data.guest_name || 'Huesped';
 
@@ -953,14 +966,25 @@ setInterval(async () => {
       const mensajes = scope.Message && scope.Message.data ? Object.values(scope.Message.data) : [];
       mensajes.sort((a, b) => (a.dttm || '').localeCompare(b.dttm || ''));
       
-      // Buscar si hay un mensaje del host POSTERIOR a la fase 1 (que no sea el mensaje de cortesía)
+      // Buscar si hay un mensaje del equipo (host o coanfitrión) POSTERIOR a la fase 1
+      // Usamos lógica inversa: si el sender NO es el huésped, es alguien del equipo
+      const reservasFase2 = (scope.Reservation && scope.Reservation.data) || {};
+      const resKeyF2 = Object.keys(reservasFase2)[0];
+      const reservaF2 = reservasFase2[resKeyF2] || {};
+      const dataF2 = (res.data && res.data.data) || {};
+      const guestIdF2 = reservaF2.guest_id || dataF2.guest_id || null;
+      
       const mensajesPostFase1 = mensajes.filter(m => {
         const esPosterior = new Date(m.dttm).getTime() > p.timestampFase1 - 5000;
-        const esDelHost = (m.sender_id && m.host_id && m.sender_id === m.host_id) ||
-                          (m.sender_type === 'host') ||
-                          (m.sent_by_host === true || m.sent_by_host === 1);
         const noEsCortesia = (m.message_text || '') !== MENSAJE_FASE1;
-        return esPosterior && esDelHost && noEsCortesia;
+        // Detectar si es del equipo: si hay guest_id, cualquiera que NO sea el guest es equipo
+        // Si no hay guest_id, usar detección clásica
+        const esDelEquipo = guestIdF2
+          ? (String(m.sender_id) !== String(guestIdF2))
+          : ((m.sender_id && m.host_id && m.sender_id === m.host_id) ||
+             (m.sender_type === 'host') ||
+             (m.sent_by_host === true || m.sent_by_host === 1));
+        return esPosterior && esDelEquipo && noEsCortesia;
       });
       
       if (mensajesPostFase1.length > 0) {
@@ -985,10 +1009,21 @@ setInterval(async () => {
 async function procesarMensajeSocket(data) {
   const msgId = data.event_id || data.id || (data.thread_id + '_' + Date.now());
   if (respondidos.has(msgId)) return;
-  const esHost = data.sent_by_host === true || data.sent_by_host === 1;
   const mensaje = data.message || data.text || data.body || '';
   const threadId = data.thread_id || data.threadId;
-  if (!mensaje || !threadId || esHost) return;
+  if (!mensaje || !threadId) return;
+  
+  // Detectar si es del equipo (host o coanfitrión)
+  const esHost = data.sent_by_host === true || data.sent_by_host === 1;
+  const guestIdSocket = data.guest_id || null;
+  const senderId = data.sender_id || data.author_id || null;
+  // Si hay guest_id, verificar que el sender ES el huésped
+  const esHuesped = guestIdSocket && senderId
+    ? (String(senderId) === String(guestIdSocket))
+    : !esHost;
+  
+  if (!esHuesped) return;
+  
   respondidos.add(msgId);
   if (respondidos.size > 1000) respondidos.delete(respondidos.values().next().value);
   const nombre = data.guest_name || data.author || 'Huesped';
