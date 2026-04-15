@@ -21,7 +21,7 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 
-const VERSION = '5.8.2';
+const VERSION = '5.8.3';
 
 const CONFIG = {
   ANTHROPIC_API_KEY:    process.env.ANTHROPIC_API_KEY,
@@ -870,27 +870,58 @@ async function procesarThread(threadId) {
     const msgId = ultimo.id;
     if (!msgId || respondidos.has(msgId)) return;
     
-    // DETECCIÓN ROBUSTA: identificar si el mensaje es del HUÉSPED
-    // En IGMS, los coanfitriones tienen sender_id diferente al host_id,
-    // así que comparar sender_id === host_id NO detecta coanfitriones.
-    // Solución: verificar que el sender ES el huésped de la reserva.
+    // DETECCIÓN ROBUSTA: ¿Este mensaje es de un HUÉSPED?
+    // Estrategia múltiple para cubrir host, coanfitriones y mensajes del bot
     const reservas = (scope.Reservation && scope.Reservation.data) || {};
     const resKey = Object.keys(reservas)[0];
     const reserva = reservas[resKey] || {};
     const data = (res.data && res.data.data) || {};
     const guestId = reserva.guest_id || data.guest_id || null;
-    
-    const esHost = (ultimo.sender_id && ultimo.host_id && ultimo.sender_id === ultimo.host_id) ||
-                   (ultimo.sender_type === 'host') ||
-                   (ultimo.sent_by_host === true || ultimo.sent_by_host === 1);
-    
-    // Si hay guest_id disponible, verificar que el sender ES el huésped
-    // Si el sender NO es el huésped, es alguien del equipo (host o coanfitrión)
-    const esHuesped = guestId
-      ? (String(ultimo.sender_id) === String(guestId))
-      : !esHost; // fallback a detección anterior si no hay guest_id
-    
     const mensaje = ultimo.message_text || ultimo.message || ultimo.text || '';
+    
+    // Log para diagnóstico (ver en Render logs)
+    console.log('[DeteccionMsg] thread=' + threadId + ' sender_id=' + ultimo.sender_id + 
+      ' host_id=' + ultimo.host_id + ' guest_id=' + guestId +
+      ' sender_type=' + (ultimo.sender_type || 'N/A') + 
+      ' sent_by_host=' + ultimo.sent_by_host +
+      ' is_host=' + (ultimo.is_host || 'N/A') +
+      ' texto="' + mensaje.substring(0, 40) + '"');
+    
+    // CHECK 1: Si el mensaje es nuestro mensaje de cortesía, SIEMPRE ignorar
+    if (mensaje === MENSAJE_FASE1) return;
+    
+    // CHECK 2: Detección clásica de host
+    const esHostClasico = (ultimo.sender_id && ultimo.host_id && String(ultimo.sender_id) === String(ultimo.host_id)) ||
+                          (ultimo.sender_type === 'host') ||
+                          (ultimo.sent_by_host === true || ultimo.sent_by_host === 1) ||
+                          (ultimo.is_host === true || ultimo.is_host === 1);
+    
+    // CHECK 3: Si hay guest_id, verificar que el sender ES el huésped
+    const esHuespedPorId = guestId ? (String(ultimo.sender_id) === String(guestId)) : null;
+    
+    // CHECK 4: Verificar si sender_id coincide con el owner (Diego: 93483) 
+    const esDiego = ultimo.sender_id && String(ultimo.sender_id) === String(CONFIG.IGMS_CLIENT_ID);
+    
+    // CHECK 5: Si el sender_id NO es el guest_id Y NO es el host_id, es coanfitrión
+    const esCoanfitrion = ultimo.sender_id && ultimo.host_id && guestId &&
+      String(ultimo.sender_id) !== String(guestId) &&
+      String(ultimo.sender_id) !== String(ultimo.host_id);
+    
+    // DECISIÓN FINAL: es huésped SOLO si estamos seguros
+    let esHuesped;
+    if (esHuespedPorId === true) {
+      esHuesped = true; // Confirmado: sender es el guest
+    } else if (esHuespedPorId === false) {
+      esHuesped = false; // Confirmado: sender NO es el guest
+    } else if (esHostClasico || esDiego || esCoanfitrion) {
+      esHuesped = false; // Algún indicador dice que es del equipo
+    } else {
+      esHuesped = !esHostClasico; // Fallback
+    }
+    
+    console.log('[DeteccionResult] esHostClasico=' + esHostClasico + ' esHuespedPorId=' + esHuespedPorId +
+      ' esDiego=' + esDiego + ' esCoanfitrion=' + esCoanfitrion + ' → esHuesped=' + esHuesped);
+    
     if (!esHuesped || !mensaje || mensaje.length < 2) return;
 
     const propiedad = reserva.listing_name || data.listing_name || 'Propiedad SuperHost Loft';
@@ -966,8 +997,7 @@ setInterval(async () => {
       const mensajes = scope.Message && scope.Message.data ? Object.values(scope.Message.data) : [];
       mensajes.sort((a, b) => (a.dttm || '').localeCompare(b.dttm || ''));
       
-      // Buscar si hay un mensaje del equipo (host o coanfitrión) POSTERIOR a la fase 1
-      // Usamos lógica inversa: si el sender NO es el huésped, es alguien del equipo
+      // Buscar si hay un mensaje del equipo POSTERIOR a la fase 1
       const reservasFase2 = (scope.Reservation && scope.Reservation.data) || {};
       const resKeyF2 = Object.keys(reservasFase2)[0];
       const reservaF2 = reservasFase2[resKeyF2] || {};
@@ -976,14 +1006,18 @@ setInterval(async () => {
       
       const mensajesPostFase1 = mensajes.filter(m => {
         const esPosterior = new Date(m.dttm).getTime() > p.timestampFase1 - 5000;
-        const noEsCortesia = (m.message_text || '') !== MENSAJE_FASE1;
-        // Detectar si es del equipo: si hay guest_id, cualquiera que NO sea el guest es equipo
-        // Si no hay guest_id, usar detección clásica
-        const esDelEquipo = guestIdF2
-          ? (String(m.sender_id) !== String(guestIdF2))
-          : ((m.sender_id && m.host_id && m.sender_id === m.host_id) ||
-             (m.sender_type === 'host') ||
-             (m.sent_by_host === true || m.sent_by_host === 1));
+        const textoMsg = m.message_text || m.message || m.text || '';
+        const noEsCortesia = textoMsg !== MENSAJE_FASE1;
+        
+        // Detectar si es del equipo (host, coanfitrión o bot)
+        const esHostClasico = (m.sender_id && m.host_id && String(m.sender_id) === String(m.host_id)) ||
+                              (m.sender_type === 'host') ||
+                              (m.sent_by_host === true || m.sent_by_host === 1) ||
+                              (m.is_host === true || m.is_host === 1);
+        const esDiego = m.sender_id && String(m.sender_id) === String(CONFIG.IGMS_CLIENT_ID);
+        const noEsHuesped = guestIdF2 ? (String(m.sender_id) !== String(guestIdF2)) : esHostClasico;
+        
+        const esDelEquipo = noEsHuesped || esHostClasico || esDiego;
         return esPosterior && esDelEquipo && noEsCortesia;
       });
       
@@ -1013,14 +1047,30 @@ async function procesarMensajeSocket(data) {
   const threadId = data.thread_id || data.threadId;
   if (!mensaje || !threadId) return;
   
-  // Detectar si es del equipo (host o coanfitrión)
-  const esHost = data.sent_by_host === true || data.sent_by_host === 1;
+  // Ignorar nuestro propio mensaje de cortesía
+  if (mensaje === MENSAJE_FASE1) return;
+  
+  // Detectar si es del equipo (host, coanfitrión, bot)
+  const esHost = data.sent_by_host === true || data.sent_by_host === 1 ||
+                 data.is_host === true || data.is_host === 1 ||
+                 data.sender_type === 'host';
   const guestIdSocket = data.guest_id || null;
   const senderId = data.sender_id || data.author_id || null;
+  const esDiego = senderId && String(senderId) === String(CONFIG.IGMS_CLIENT_ID);
+  
   // Si hay guest_id, verificar que el sender ES el huésped
-  const esHuesped = guestIdSocket && senderId
-    ? (String(senderId) === String(guestIdSocket))
-    : !esHost;
+  let esHuesped;
+  if (guestIdSocket && senderId) {
+    esHuesped = String(senderId) === String(guestIdSocket);
+  } else if (esHost || esDiego) {
+    esHuesped = false;
+  } else {
+    esHuesped = !esHost;
+  }
+  
+  console.log('[Socket-Deteccion] thread=' + threadId + ' sender=' + senderId + 
+    ' guest_id=' + guestIdSocket + ' esHost=' + esHost + ' esDiego=' + esDiego +
+    ' → esHuesped=' + esHuesped + ' texto="' + mensaje.substring(0, 40) + '"');
   
   if (!esHuesped) return;
   
@@ -1469,12 +1519,18 @@ app.get('/poll/debug', async (req, res) => {
         resultados.push({
           thread_id: threadId,
           propiedad: (reserva.listing_name || tData.listing_name || '???').substring(0, 50),
-          huesped: reserva.guest_name || '???',
+          huesped: reserva.guest_name || tData.guest_name || '???',
+          guest_id: reserva.guest_id || tData.guest_id || '???',
           total_mensajes: mensajes.length,
           ultimo_mensaje: ultimo ? {
             id: ultimo.id,
             texto: (ultimo.message_text || '').substring(0, 120),
-            es_host: ultimo.sender_id === ultimo.host_id,
+            sender_id: ultimo.sender_id,
+            host_id: ultimo.host_id,
+            sender_type: ultimo.sender_type || 'N/A',
+            sent_by_host: ultimo.sent_by_host,
+            is_host: ultimo.is_host || 'N/A',
+            es_host_clasico: ultimo.sender_id === ultimo.host_id,
             fecha: ultimo.dttm,
             ya_respondido: respondidos.has(ultimo.id),
           } : null,
@@ -1499,6 +1555,70 @@ app.get('/poll/debug', async (req, res) => {
       analizados: resultados.length,
       threads: resultados,
       nota: 'DRY-RUN: no se envió nada.'
+    });
+  } catch(e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ===========================================================
+// DIAGNÓSTICO: ver campos crudos de mensajes de un thread
+// GET /debug/thread-messages?thread_id=XXXXX
+// ===========================================================
+app.get('/debug/thread-messages', async (req, res) => {
+  try {
+    const threadId = req.query.thread_id;
+    if (!threadId) return res.json({ ok: false, error: 'Falta ?thread_id=XXXXX' });
+    const ok = await asegurarSesion();
+    if (!ok) return res.json({ ok: false, error: 'Sin sesion IGMS' });
+    
+    const tRes = await axios.get(
+      'https://www.igms.com/api/data/thread-page-data?params[thread_id]=' + threadId +
+      '&params[platform_type]=airbnb&params[owner_user_id]=' + CONFIG.IGMS_CLIENT_ID,
+      { headers: getApiHeaders() }
+    );
+    const scope = (tRes.data && tRes.data.scopeData) || {};
+    const mensajes = scope.Message && scope.Message.data ? Object.values(scope.Message.data) : [];
+    mensajes.sort((a, b) => (a.dttm || '').localeCompare(b.dttm || ''));
+    
+    const reservas = (scope.Reservation && scope.Reservation.data) || {};
+    const resKey = Object.keys(reservas)[0];
+    const reserva = reservas[resKey] || {};
+    const tData = (tRes.data && tRes.data.data) || {};
+    
+    // Mostrar los últimos 8 mensajes con TODOS sus campos relevantes
+    const ultimos = mensajes.slice(-8).map(m => {
+      const campos = {};
+      // Copiar todos los campos que puedan servir para identificar al sender
+      for (const key of Object.keys(m)) {
+        if (['id', 'sender_id', 'host_id', 'guest_id', 'sender_type', 'sent_by_host',
+             'author_id', 'user_id', 'from_id', 'role', 'type', 'message_type',
+             'is_host', 'is_guest', 'dttm', 'platform_message_id'].includes(key)) {
+          campos[key] = m[key];
+        }
+      }
+      campos._texto = (m.message_text || m.message || m.text || '').substring(0, 80);
+      campos._todos_los_campos = Object.keys(m).sort().join(', ');
+      return campos;
+    });
+    
+    res.json({
+      ok: true,
+      thread_id: threadId,
+      reserva_campos: {
+        guest_id: reserva.guest_id || 'NO EXISTE',
+        guest_name: reserva.guest_name || 'NO EXISTE',
+        host_id: reserva.host_id || 'NO EXISTE',
+        listing_name: (reserva.listing_name || '').substring(0, 50),
+        _todos_campos_reserva: Object.keys(reserva).sort().join(', '),
+      },
+      thread_data_campos: {
+        guest_id: tData.guest_id || 'NO EXISTE',
+        host_id: tData.host_id || 'NO EXISTE',
+        _todos_campos_data: Object.keys(tData).sort().join(', '),
+      },
+      total_mensajes: mensajes.length,
+      ultimos_8_mensajes: ultimos,
     });
   } catch(e) {
     res.status(500).json({ ok: false, error: e.message });
